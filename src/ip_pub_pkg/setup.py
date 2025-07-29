@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'ip_publisher = ip_pub_pkg.ip_publisher:main'
         ],
     },
 )

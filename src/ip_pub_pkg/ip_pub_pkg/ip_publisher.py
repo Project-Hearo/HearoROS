@@ -6,15 +6,15 @@ import subprocess
 class IPPublisher(Node):
     def __init__(self):
         super().__init__('ip_publisher')
-        self.pub = self.create_publiser(String, '/rpi5_ip', 10)
+        self.pub = self.create_publisher(String, '/rpi5_ip', 10)
         self.timer = self.create_timer(2.0, self.timer_cb)
         
-    def pick_ip_from_hostnameI(self):
+    def pick_ip_from_hostname(self):
         try:
             out = subprocess.check_output("hostname -I", shell=True, text=True).strip().split()
             ignore_prefixes = ('127.', '172.17.')
             cand = [ip for ip in out if ip and not ip.startswith(ignore_prefixes)]
-            pref = (lamda ip:
+            pref = (lambda ip:
                     (0 if ip.startswith('10.42.') else
                      1 if ip.startswith('192.168.') else
                      2 if ip.startswith('10.')else
@@ -23,10 +23,10 @@ class IPPublisher(Node):
             return cand[0] if cand else "unknown"
         except Exception as e:
             self.get_logger().warn(f"hostname -I failed: {e}")
-            return "unknows"
+            return "unknown"
         
     def timer_cb(self):
-        ip = self.pick_ip_from_hostnameI()
+        ip = self.pick_ip_from_hostname()
         self.pub.publish(String(data=ip))
         self.get_logger().info(f"? IP publish: {ip}")
         
