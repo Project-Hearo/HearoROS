@@ -1,0 +1,25 @@
+# ROS2 colcon build, install, log 디렉토리
+/build/
+/install/
+/log/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.so
+
+# Editor & OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python virtual environments
+venv/
+.env/
+.venv/
+
+# Colcon build artifacts
+*.pyc
+colcon.meta
