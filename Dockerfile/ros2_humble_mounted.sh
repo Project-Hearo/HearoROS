@@ -1,4 +1,6 @@
-docker run -it \
+docker rm -f ros_container
+
+docker run -it --rm\
   --privileged=true \
   --net=host \
   -e DISPLAY=$DISPLAY \

@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'ip_pub_pkg'
+package_name = 'status_pkg'
 
 setup(
     name=package_name,
@@ -13,14 +13,14 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='injunsik',
-    maintainer_email='injunsik@todo.todo',
+    maintainer='imjunsik',
+    maintainer_email='imjunsik@todo.todo',
     description='TODO: Package description',
-    license='TODO: License declaration',
+    license='MIT',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'ip_publisher = ip_pub_pkg.ip_publisher:main'
+            'ip_publisher = status_pkg.ip_publisher:main'
         ],
     },
 )
