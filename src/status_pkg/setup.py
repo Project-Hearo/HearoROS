@@ -20,8 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'ip_publisher = status_pkg.ip_publisher:main'
-            'ble_provision_server = status_pkg.ble_provision_server:main'
+            'ip_publisher = status_pkg.ip_publisher:main',
+            'ble_provision_server = status_pkg.ble_provision_server:main',
         ],
     },
 )
