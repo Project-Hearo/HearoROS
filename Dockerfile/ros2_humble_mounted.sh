@@ -7,6 +7,7 @@ docker run -it --rm\
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v /dev/input:/dev/input \
   -v /dev/video0:/dev/video0 \
+  -v /var/run/dbus:/var/run/dbus \
   -v ~/Desktop/HearoROS:/root/HearoROS \
   yahboomtechnology/ros-humble:4.1.2 \
   /bin/bash
