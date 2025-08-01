@@ -5,7 +5,7 @@ docker run -it --rm\
   --privileged=true \
   --net=host \
   -e DISPLAY=$DISPLAY \
-  --env="QT_X11_NO_MITSHM=1" \ 
+  --env="QT_X11_NO_MITSHM=1" \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   --security-opt apparmor:unconfined \
   -v /dev/input:/dev/input \
@@ -16,7 +16,7 @@ docker run -it --rm\
   /bin/bash \
   /root/1.sh
 
-  
+
   # 일부 QT GUI앱이 공유 메모리 미사용으로 돌아가게 설정
 # GUI출력을 위한 X11 소켓 공유
   # 장치 입출력 접근 기능
