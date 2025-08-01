@@ -1,0 +1,37 @@
+running egg_info
+creating build/lader_sensor/lader_sensor.egg-info
+writing build/lader_sensor/lader_sensor.egg-info/PKG-INFO
+writing dependency_links to build/lader_sensor/lader_sensor.egg-info/dependency_links.txt
+writing entry points to build/lader_sensor/lader_sensor.egg-info/entry_points.txt
+writing requirements to build/lader_sensor/lader_sensor.egg-info/requires.txt
+writing top-level names to build/lader_sensor/lader_sensor.egg-info/top_level.txt
+writing manifest file 'build/lader_sensor/lader_sensor.egg-info/SOURCES.txt'
+reading manifest file 'build/lader_sensor/lader_sensor.egg-info/SOURCES.txt'
+writing manifest file 'build/lader_sensor/lader_sensor.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /root/HearoROS/src/lader_sensor/build/lader_sensor/build
+creating /root/HearoROS/src/lader_sensor/build/lader_sensor/build/lib
+creating /root/HearoROS/src/lader_sensor/build/lader_sensor/build/lib/lader_sensor
+copying lader_sensor/__init__.py -> /root/HearoROS/src/lader_sensor/build/lader_sensor/build/lib/lader_sensor
+copying lader_sensor/lader_avoidance.py -> /root/HearoROS/src/lader_sensor/build/lader_sensor/build/lib/lader_sensor
+running install
+/usr/lib/python3/dist-packages/setuptools/command/install.py:34: SetuptoolsDeprecationWarning: setup.py install is deprecated. Use build and pip and other standards-based tools.
+  warnings.warn(
+running install_lib
+creating /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/python3.10/site-packages/lader_sensor
+copying /root/HearoROS/src/lader_sensor/build/lader_sensor/build/lib/lader_sensor/__init__.py -> /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/python3.10/site-packages/lader_sensor
+copying /root/HearoROS/src/lader_sensor/build/lader_sensor/build/lib/lader_sensor/lader_avoidance.py -> /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/python3.10/site-packages/lader_sensor
+byte-compiling /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/python3.10/site-packages/lader_sensor/__init__.py to __init__.cpython-310.pyc
+byte-compiling /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/python3.10/site-packages/lader_sensor/lader_avoidance.py to lader_avoidance.cpython-310.pyc
+running install_data
+creating /root/HearoROS/src/lader_sensor/install/lader_sensor/share/ament_index
+creating /root/HearoROS/src/lader_sensor/install/lader_sensor/share/ament_index/resource_index
+creating /root/HearoROS/src/lader_sensor/install/lader_sensor/share/ament_index/resource_index/packages
+copying resource/lader_sensor -> /root/HearoROS/src/lader_sensor/install/lader_sensor/share/ament_index/resource_index/packages
+copying package.xml -> /root/HearoROS/src/lader_sensor/install/lader_sensor/share/lader_sensor
+running install_egg_info
+Copying build/lader_sensor/lader_sensor.egg-info to /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/python3.10/site-packages/lader_sensor-0.0.0-py3.10.egg-info
+running install_scripts
+Installing laser_avoid script to /root/HearoROS/src/lader_sensor/install/lader_sensor/lib/lader_sensor
+writing list of installed files to '/root/HearoROS/src/lader_sensor/build/lader_sensor/install.log'
