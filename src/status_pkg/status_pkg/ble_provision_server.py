@@ -24,7 +24,7 @@ def b64u(b: bytes) -> str:
 # 앱과 장치가 동일 규칙으로 계산해야 하는 서명
 # 메시지 포멧 "{nonce}.{device_id}"
 def hmac_sign(key: bytes, nonce: str, device_id: str) -> str:
-    msg = f'{nonce}.{device_id}'.encode('utf-8')                 # ← 오타 수정(uft-8 → utf-8)
+    msg = f'{nonce}.{device_id}'.encode('utf-8')
     return b64u(hmac.new(key, msg, hashlib.sha256).digest())
 
 # 앱 화면/로그에 보여줄 장치 식별자. 인증 서명에도 들어감
@@ -68,7 +68,18 @@ def main(args=None):
     name_suffix = node._device_id[-4:] if len(node._device_id) >= 4 else node._device_id
     # 광고 이름: HEARO-SETUP-XXXX
     # 서비스에 특성들을 추가한다 -> 광고 이름은 HEARO-SETUP이다.
-    p = Peripheral(adapter_addr=None, local_name=f'HEARO-SETUP-{name_suffix}')
+    name = f'HEARO-SETUP-{name_suffix}'
+    try:
+        # 1순위
+        p = Peripheral(adapter_address=None, local_name=name)
+    except TypeError:
+        try:
+            #2순위
+            p = Peripheral(adapter_addr=None, local_name=name)
+        except TypeError:
+            #3순위
+            p = Peripheral(local_name = name)
+            
     p.add_service(svc_id=svc_id, uuid=WIFI_SERVICE_UUID, primary=True)
 
     # 앱이 STATUS를 Read하면 기본 상태는 idle.
