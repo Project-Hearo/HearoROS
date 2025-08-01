@@ -22,6 +22,8 @@ if __name__ == '__main__':
     print(f"기본 FPS: {base_fps:.2f}")
     print(f"밝기: {brightness}, 대비: {contrast}")
     
+    start_time = time.time()
+    frame_count = 0
     while True:
         ret, frame = cap.read()
         if not ret:
