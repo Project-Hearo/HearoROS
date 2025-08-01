@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'laser_avoid = lader_sensor.laser_avoidance:main'
+            'laser_avoid = lader_sensor.lader_avoidance:main'
         ],
     },
 )
