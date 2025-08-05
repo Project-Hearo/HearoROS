@@ -2,14 +2,21 @@ import rclpy
 from rclpy.node import Node
 import paho.mqtt.client as mqtt
 import json
-import json
 from pathlib import Path
 from threading import Thread
 import time
+import importlib.resources
 
-config_path = Path(__file__).parent / 'config.json'
-with open(config_path, 'r') as f:
-    config = json.load(f)
+try:
+    with importlib.resources.files('ros_mqtt_bridge').joinpath('config.json').open('r') as f:
+        config = json.load(f)
+except FileNotFoundError:
+    print("[ERROR] config.json 파일을 찾을 수 없습니다.")
+    exit(1)
+except json.JSONDecodeError as e:
+    print(f"[ERROR] config.json 파싱 실패: {e}")
+    exit(1)
+    
     
 class RosMqttBridge(Node):
     def __init__(self):
@@ -75,6 +82,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass    
     finally:
+        node.get_logger().info("MQTT 연결 종료 중...")
         node.mqtt_client.loop_stop()
         node.mqtt_client.disconnect()
         node.destroy_node()
