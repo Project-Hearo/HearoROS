@@ -1,0 +1,4 @@
+string sensor_type
+---
+uinu16 battery
+string imu_json
