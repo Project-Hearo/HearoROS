@@ -1,5 +1,5 @@
 {
-    "broker_host" : "192.168.45.5",
+    "broker_host" : "192.168.45.164",
     "broker_port" : 1883,
     "robot_id" : "robot001"
 }

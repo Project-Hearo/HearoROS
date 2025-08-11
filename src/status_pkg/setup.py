@@ -22,7 +22,7 @@ setup(
         'console_scripts': [
             'ip_publisher = status_pkg.ip_publisher:main',
             'ble_provision_server = status_pkg.ble_provision_server:main',
-            'battery_imu_service = status_pkg.battery_imu_service_node:main'
+            'status_service = status_pkg.status_servic_node:main'
         ],
     },
 )
