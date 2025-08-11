@@ -70,7 +70,7 @@ class RosMqttBridge(Node):
         self._stop_timer = None # 모션 정지용 타이머 핸들 저장(핸들러에서 쓴다)
         
         #핸들러 플러그인 자동 로드
-        self.dispatcher = Dispatcher(self, threaded=False)
+        self.dispatcher = Dispatcher(self, threaded=True, max_workers=2)
         self.dispatcher.load_plugins() # handlers/*.py를 스캔해 @register된 핸들러들을 인스턴스화 한다.
     # ------------- MQTT ------------
     # 모든 명령(.../cmd/#)구독, 온라인 true알름
