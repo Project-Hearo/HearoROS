@@ -1,0 +1,12 @@
+#Request
+
+string map_name
+string pgm_path
+string yaml_path
+string upload_url
+string token
+---
+bool ok
+string code
+string message
+string upload_json
