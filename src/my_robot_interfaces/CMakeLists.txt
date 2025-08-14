@@ -15,7 +15,8 @@ find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/RobotStatus.srv"
-  DEPENDENCIES std_msgs
+  "action/SlamSession.action"
+  DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
 )
 
 if(BUILD_TESTING)

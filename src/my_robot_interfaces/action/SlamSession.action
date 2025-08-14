@@ -12,6 +12,7 @@ string message
 
 ---
 # Feedback
-geometry_msgs/msg/Pose2D Pose2D
+geometry_msgs/msg/Pose2D pose
 float32 progress
 float32 quality
+string status
