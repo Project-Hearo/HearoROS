@@ -3,7 +3,7 @@ from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import Twist
-from my_robot_interfaces.srv import RobotStatus
+
 
 from ros_mqtt_bridge.handlers.dispatcher import Dispatcher
 
@@ -28,7 +28,7 @@ class RosMqttBridge(Node):
         self.robot_id    = cfg['robot_id']
         self.broker_host = cfg['broker_host']
         self.broker_port = cfg['broker_port']
-        self.keepalive   = cfg.get('keepalive', 45) #
+        self.keepalive   = cfg.get('keepalive', 45) 
 
         # ---- mqtt topics ----
         # 명령은 robot/<id>/cmd/<리소스>/<액션>
@@ -86,35 +86,33 @@ class RosMqttBridge(Node):
     def _on_disconnect(self, client, userdata, rc):
         self.connected = False
         self.get_logger().warn(f"MQTT disconnected rc={rc}")
-    # 토픽에서 status/get 같은 cmd_path를 뽑고, payload에 cmd가 점표기면 보정
+    
+    def _extract_topic(self ,topic: str, *, base_prefix: str = None, keyword: str = None) -> str:
+        if base_prefix:
+            prefix = base_prefix.rstrip('/') + '/'
+            return topic[len(prefix):] if topic.startswith(prefix) else ""
+        if keyword:
+            parts = topic.split('/')
+            return '/'.join(parts[parts.index(keyword)+1:]) if keyword in parts else ""
+        return ""
+        
     def _on_message(self, client, userdata, msg):
         try:
-            payload = json.loads(msg.payload.decode('utf-8'))
+            payload = json.loads(msg.payload.decode('utf-8', errors='strict'))
             req_id = payload.get('req_id')
-            
-            prefix = self.topic_cmd_base + '/'
-            cmd_path = msg.topic[len(prefix):] if msg.topic.startswith(prefix) else None
-            
-            cmd = payload.get('cmd', cmd_path)
-            if cmd and '.' in cmd and not cmd_path:
-                cmd_path = cmd.replace('.', '/')
-                
-            args   = payload.get('args', {})
-            if not req_id or not isinstance(cmd_path, str) or not cmd_path:
-                raise ValueError("missing req_id or cmd")
+            request = payload.get('request', {})
+            cmd_path = self._extract_topic(msg.topic, base_prefix=self.topic_cmd_base)
             
         except Exception as e:
             self._publish_resp(None, ok=False, error={"code":"bad_request","message":str(e)})
             return
 
-        # MQTT 콜백 스레드 → 내부 큐(가볍게 적재만)
         with self._qlock:
-            self._q.append((req_id, cmd_path, args))
+            self._q.append((req_id, cmd_path, request))
             self._req_cmd[req_id] = cmd_path
             self.metrics["recv"] += 1
             self.metrics["q_max"] = max(self.metrics["q_max"], len(self._q))
 
-    # ------------- Queue worker (가벼운 라우팅 전용) -------------
     def _process_queue(self):
         if not self._q:
             return
@@ -126,7 +124,6 @@ class RosMqttBridge(Node):
             self.get_logger().exception("handler dispatch error")
             self._publish_resp(req_id, ok=False, error={"code":"handler_error","message":str(e)})
 
-    # ------------- Utils: 응답 헬퍼 -------------
     def _publish_ack(self, req_id, extra=None):
         self.metrics["ack"] += 1
         self._publish_resp(req_id, ok=True, data={"state":"accepted", **(extra or {})})
@@ -134,8 +131,8 @@ class RosMqttBridge(Node):
     def _publish_result(self, req_id, result: dict):
         self._publish_resp(req_id, ok=True, data={"state":"result", **result}, finalize=True)
 
-    def _publish_feedback(self, req_id, fb: dict):
-        self._publish_resp(req_id, ok=True, data={"state":"feedback", **fb})
+    def _publish_feedback(self, req_id, feedback: dict):
+        self._publish_resp(req_id, ok=True, data={"state":"feedback", **feedback})
 
     def _publish_resp(self, req_id, ok=True, data=None, error=None, *, finalize=False):
         if not ok:
@@ -164,7 +161,6 @@ class RosMqttBridge(Node):
             self._req_cmd.pop(req_id, None)
 
     def _arm_timeout(self, req_id, future, timeout_sec: float):
-        """future가 timeout_sec 내 완료 안되면 timeout 응답 전송"""
         start = time.time()
         def _check_timeout():
             if future.done():
@@ -207,7 +203,7 @@ class RosMqttBridge(Node):
             if waited >= timeout:
                 self.get_logger().warn(f"service {name} not ready; keep trying")
                 break
-
+    
 def main(args=None):
     rclpy.init(args=args)
     node = RosMqttBridge()

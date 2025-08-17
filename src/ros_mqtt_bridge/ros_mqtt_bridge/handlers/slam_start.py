@@ -4,6 +4,7 @@ from .registry import register
 from rclpy.action import ActionClient
 from my_robot_interfaces.action import SlamSession
 from geometry_msgs.msg import Pose2D
+from my_robot_interfaces.srv import MapUpload
 
 import requests
 from pathlib import Path
@@ -18,12 +19,14 @@ class SlamStartHandler(CommandHandler):
         self.ac = ActionClient(node, SlamSession, 'slam/session')
         
         self.upload_url = getattr(node, "upload_url", "https://<주소>/<메서드>")
-        self.upload_token = getattr(node, "upload_token", None)   # Bearer token 등
         self.map_dir = Path(getattr(node, "map_dir", "/data/maps"))  # SLAM 저장 경로
+        self.upload_token = getattr(node ,"upload_token", None)
         
+        self.upload_cli = self.node.create_client(MapUpload, '/map_uploader/upload')
         self._goals = {}
         
     def handle(self, req_id, args):
+        args = args or {}
         
         if not self.ac.wait_for_server(timeout_sec=2.0):
             self.node._publish_resp(req_id, ok=False,
@@ -36,15 +39,15 @@ class SlamStartHandler(CommandHandler):
         goal.map_name = str(args.get('map_name', goal.session_id))
         goal.duration_sec = float(args.get('duration_sec', 0.0))
         
-        def fb_cb(fb):
-            f = fb.feedback
+        def feedback_callback(fb):
+            f = getattr(fb, "feedback", fb)
             self.node._publish_feedback(req_id, {
                 "pose": {"x": f.pose.x, "y": f.pose.y, "theta": f.pose.theta},
-                "progress": float(f.progress),
-                "quality": float(f.quality),
+                "progress": float(getattr(f, "progress", 0.0)),
+                "quality": float(getattr(f, "quality", 0.0)),
             })
             
-        send_future = self.ac.send_goal_async(goal, feedback_callback=fb_cb)
+        send_future = self.ac.send_goal_async(goal, feedback_callback=feedback_callback)
         
         def on_goal_sent(fut):
             try:
@@ -58,6 +61,9 @@ class SlamStartHandler(CommandHandler):
                 self.node._publish_resp(req_id, ok=False,
                     error={"code":"rejected","message":"goal rejected"})
                 return
+            
+            self.node._publish_ack(req_id, {"goal_accepted": True})
+            
             res_future = gh.get_result_async()
             res_future.add_done_callback(lambda rf: self._on_result(req_id, goal, rf))
             
@@ -65,64 +71,69 @@ class SlamStartHandler(CommandHandler):
         
     def _on_result(self, req_id, goal, res_future):
         try:
-            res = res_future.result()
-            if not res.success:
+            response = res_future.result()
+            result = getattr(response, "result", response)
+            success = getattr(result, "success", False)
+            message = getattr(result, "message", "")
+            map_path = getattr(result, "map_path", "")
+            
+            if not success:
                 self.node._publish_resp(req_id, ok=False,
-                error={"code":"slam_failed","message":res.message})
+                    error={"code":"slam_failed","message": message})
                 return
-                
             pgm = self.map_dir / f"{goal.map_name}.pgm"
             yaml = self.map_dir / f"{goal.map_name}.yaml"
-                
+            
             self.node._publish_feedback(req_id, {
                 "phase": "uploading",
                 "files": [str(pgm), str(yaml)]
             })
-                
-            url = self.upload_url
-            headers = {}
-            if self.upload_token:
-                headers["Authorization"] = f"Bearer {self.upload_token}"                
-                
-            meta = {
-                "map_id": f"{goal.session_id}-{int(time.time())}",
-                "robot_id": self.node.robot_id,
-                "map_name": goal.map_name,
-                "session_id": goal.session_id,
-            }
-                
-            files = {}
-            if pgm.exists():
-                files["map_pgm"] = (pgm.name, open(pgm, "rb"), "image/x-portable-graymap")
-            if yaml.exists():
-                files["map_yaml"] = (yaml.name, open(yaml, "rb"), "application/x-yaml")
-                    
-            if not files:
+            
+            if not self.upload_cli.wait_for_service(timeout_sec=2.0):
                 self.node._publish_resp(req_id, ok=False,
-                error={"code":"missing_files","message":"pgm/yaml not found"})
+                    error={"code":"upload_service_unavailable","message":"MapUploader not available"})
                 return
+            
+            
+            request = MapUpload.Request()
+            request.upload_url = self.upload_url
+            request.token = self.upload_token or ""
+            request.map_name = goal.map_name
+            request.pgm_path = str(pgm)
+            request.yaml_path = str(yaml)
+            
+            future = self.upload_cli.call_async(request)
+            def on_uploaded(_fut):
+                try:
+                    srv_res = _fut.result()  # MapUpload.Response
+                except Exception as e:
+                    self.node._publish_resp(req_id, ok=False,
+                        error={"code":"upload_exception","message":str(e)})
+                    return
 
-            r = requests.post(url, data=meta, files=files, headers=headers, timeout=120)
-            for f in files.values():
-                try: f[1].close()
-                except Exception: pass
-                
-            r.raise_for_status()
-            resp_json = {}
-            try:
-                resp_json = {}
-            except Exception:
-                pass
-                
-            self.node._publish_result(req_id, {
-                "success": True,
-                "message": "SLAM finished and uploaded",
-                "map_path": getattr(res, "map_path", ""),
-                "upload_response": resp_json
-            })
+                if not getattr(srv_res, "ok", False):
+                    self.node._publish_resp(req_id, ok=False, error={
+                        "code":    getattr(srv_res, "code", "UPLOAD_FAILED"),
+                        "message": getattr(srv_res, "message", "upload failed"),
+                        "detail":  getattr(srv_res, "upload_json", "")[:512],
+                    })
+                    return
+
+                self.node._publish_result(req_id, data={
+                    "success": True,
+                    "message": getattr(srv_res, "message", "SLAM finished and uploaded"),
+                    "map_path": map_path,
+                    "upload_code": getattr(srv_res, "code", ""),
+                    "upload_response": getattr(srv_res, "upload_json", ""),
+                })
+
+            future.add_done_callback(on_uploaded)
+
         except Exception as e:
             self.node._publish_resp(req_id, ok=False,
-                error={"code":"upload_failed","message":str(e)})
-
+                error={"code":"result_error","message":str(e)})
+            
+            
+           
 
 
