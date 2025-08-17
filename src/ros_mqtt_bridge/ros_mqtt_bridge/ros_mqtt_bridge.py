@@ -150,8 +150,7 @@ class RosMqttBridge(Node):
         
         cmd_path = self._req_cmd.get(req_id)
         
-        topic = (f"{self.topic_resp_base}/{cmd_path}/{req_id}"
-                 if (req_id and cmd_path) else self.topic_resp_base)
+        topic = f"{self.topic_resp_base}/{cmd_path}"
         
         s = json.dumps(msg, separators=(',',':'))
         r = self.mqtt.publish(topic, s, qos=1, retain=False)
