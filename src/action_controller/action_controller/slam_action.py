@@ -30,7 +30,7 @@ class SlamAction(Node):
         self.sub = self.create_subscription(
             PoseArray,              # MarkerArray로 바꿀 경우 여기 타입 변경
             topic,
-            self._on_frontiers,
+            self.on_frontiers,
             10,
             callback_group=self.cb_group
         )
@@ -128,7 +128,6 @@ def main():
         
     executor = MultiThreadedExecutor(num_threads=2)
     try:
-        # 멀티스레드로 돌려야 액션 실행 중에도 서브스크립션 콜백이 잘 돈다
         executor = MultiThreadedExecutor(num_threads=2)
         executor.add_node(node)
         executor.spin()

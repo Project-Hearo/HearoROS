@@ -4,8 +4,9 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from geometry_msgs.msg import Twist
 
+from ros_mqtt_bridge.telemetry_handlers.telemetry_manager import TelemetryManager
 
-from ros_mqtt_bridge.handlers.dispatcher import Dispatcher
+from ros_mqtt_bridge.cmd_handlers.dispatcher import Dispatcher
 
 import paho.mqtt.client as mqtt
 import time, json, threading
@@ -35,8 +36,11 @@ class RosMqttBridge(Node):
         # 응답은 robot/<id>/resp/<리소스>/<액션>/<req_id>
         self.topic_cmd_base    = f'robot/{self.robot_id}/cmd' # 명령 입력
         self.topic_resp_base   = f'robot/{self.robot_id}/resp' #결과/에러 응답
+        
         self.topic_online = f'robot/{self.robot_id}/status/online' #LWT 포함 올라인 표시
         self.topic_bridge = f'robot/{self.robot_id}/status/bridge'
+        
+        self.topic_telemetry = f'robot/{self.robot_id}/telemetry'
         
         #req_id -> cmd_path('status/get') 매핑 저장
         self._req_cmd = {}
@@ -72,6 +76,10 @@ class RosMqttBridge(Node):
         #핸들러 플러그인 자동 로드
         self.dispatcher = Dispatcher(self, threaded=True, max_workers=2)
         self.dispatcher.load_plugins() # handlers/*.py를 스캔해 @register된 핸들러들을 인스턴스화 한다.
+        
+        self.telemetry_manager = TelemetryManager(self)
+        self.telemetry_manager.load_plugins()
+        self.telemetry_manager.start_all()
     # ------------- MQTT ------------
     # 모든 명령(.../cmd/#)구독, 온라인 true알름
     def _on_connect(self, client, userdata, flags, rc):
@@ -102,7 +110,9 @@ class RosMqttBridge(Node):
             req_id = payload.get('req_id')
             request = payload.get('request', {})
             cmd_path = self._extract_topic(msg.topic, base_prefix=self.topic_cmd_base)
-            
+            if not isinstance(req_id, str) or not req_id:
+                self.get_logger().warn("bad request: missing req_id")
+                return
         except Exception as e:
             self._publish_resp(None, ok=False, error={"code":"bad_request","message":str(e)})
             return
@@ -149,6 +159,9 @@ class RosMqttBridge(Node):
             return
         
         cmd_path = self._req_cmd.get(req_id)
+        if not req_id or not cmd_path:
+            self.get_logger().warn(f"skip resp: missing req_id or cmd_path (req_id={req_id}, cmd_path={cmd_path})")
+            return
         
         topic = f"{self.topic_resp_base}/{cmd_path}"
         
@@ -158,7 +171,30 @@ class RosMqttBridge(Node):
             self.get_logger().error(f"publish failed rc={r.rc}")
         if finalize and req_id:
             self._req_cmd.pop(req_id, None)
-
+            
+    def _publish_telemetry(
+        self,
+        path: str,
+        payload: dict,
+        *, qos: int = 1, retain:bool = False):
+        
+        norm = path.replace('.','/').strip('/').lower()
+        topic = f"{self.topic_telemetry}/{norm}"
+        
+        if not self.connected:
+            self.get_logger().warn("skip publish: mqtt disconnected")
+            return
+        
+        try:
+            s = json.dumps(payload, separators=(',', ':'))
+            response = self.mqtt.publish(topic, s, qos=qos, retain=retain)
+            if response.rc != mqtt.MQTT_ERR_SUCCESS:
+                self.get_logger().error(f"telemetry publish failed rc={response.rc} topic={topic}")
+        except Exception as e:
+            self.metrics["errors"] += 1
+            self.get_logger().exception(f"telemetry publish error: {e}")
+        
+        
     def _arm_timeout(self, req_id, future, timeout_sec: float):
         start = time.time()
         def _check_timeout():
@@ -207,16 +243,19 @@ def main(args=None):
     rclpy.init(args=args)
     node = RosMqttBridge()
     executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
         rclpy.spin(node, executor=executor)
     except KeyboardInterrupt:
         pass
     finally:
         node.get_logger().info("shutdown...")
+        node.telemetry_manager.stop_all()
         node.mqtt.loop_stop()
         node.mqtt.disconnect()
         node.destroy_node()
         node.dispatcher.shutdown()
+        executor.shutdown()
         rclpy.shutdown()
 
 if __name__ == '__main__':
