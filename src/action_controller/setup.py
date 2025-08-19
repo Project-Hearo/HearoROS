@@ -20,6 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'slam_action_server = action_controller.slam_action:main'
         ],
     },
 )
