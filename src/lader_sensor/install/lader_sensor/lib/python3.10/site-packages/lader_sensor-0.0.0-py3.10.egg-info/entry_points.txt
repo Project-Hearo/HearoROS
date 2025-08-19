@@ -1,3 +1,0 @@
-[console_scripts]
-laser_avoid = lader_sensor.lader_avoidance:main
-
