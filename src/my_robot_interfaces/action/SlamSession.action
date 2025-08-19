@@ -1,18 +1,16 @@
-#Goal
+# Goal
 string session_id
 bool save_map
 string map_name
 float32 duration_sec
-
 ---
 # Result
 bool success
 string map_path
 string message
-
 ---
 # Feedback
-geometry_msgs/msg/Pose2D pose
+geometry_msgs/PoseStamped pose
 float32 progress
 float32 quality
 string status
