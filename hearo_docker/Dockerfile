@@ -1,21 +1,23 @@
 FROM yahboomtechnology/ros-humble:4.1.2
 ENV DEBIAN_FRONTEND=noninteractive
 
+SHELL ["/bin/bash", "-c"]
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-slam-toolbox \
     ros-humble-rviz2 \
     ros-humble-nav2-map-server \
     ros-humble-nav2-bringup \
     ros-humble-nav2-costmap-2d \
-    ros-humble-amcl \
+    ros-humble-nav2-amcl \
  && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /root/colcon_ws/src
-RUN . /opt/ros/humble/setup.sh && \
+WORKDIR /root/colcon_ws
+RUN mkdir -p src && \
+    source /opt/ros/humble/setup.bash && \
     rosdep update && \
-    rosdep install --from-paths /root/colcon_ws/src --ignore-src -r -y || true && \
+    rosdep install --from-paths src --ignore-src -r -y || true && \
     colcon build --symlink-install || true
-
 
 RUN printf '%s\n' \
   'source /opt/ros/humble/setup.bash' \
@@ -25,3 +27,13 @@ RUN printf '%s\n' \
 
 ENTRYPOINT ["/ros_entry.sh"]
 CMD ["/bin/bash"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends git python3-vcstool && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/colcon_ws/src
+
+WORKDIR /root/colcon_ws
+RUN source /opt/ros/humble/setup.bash && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y && \
+    colcon build --symlink-install
