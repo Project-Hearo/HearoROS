@@ -10,8 +10,9 @@ RUN set -e; \
     rm -f /etc/apt/sources.list.d/ros2* || true; \
     rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true; \
     . /etc/os-release; \
+    export ROS_APT_SOURCE_VERSION="$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F tag_name | awk -F\" '{print $4}')"; \
     curl -fsSL -o /tmp/ros2-apt-source.deb \
-      "https://github.com/ros-infrastructure/ros-apt-source/releases/latest/download/ros2-apt-source_${VERSION_CODENAME}_all.deb"; \
+      "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.${VERSION_CODENAME}_all.deb"; \
     dpkg -i /tmp/ros2-apt-source.deb || true; \
     apt-get update; \
     apt-get -f install -y && rm -rf /var/lib/apt/lists/*
