@@ -1,7 +1,19 @@
 FROM yahboomtechnology/ros-humble:4.1.2
 ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash","-c"]
 
-SHELL ["/bin/bash", "-c"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates gnupg lsb-release && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -e; \
+    rm -f /etc/apt/sources.list.d/ros2.list || true; \
+    rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true; \
+    apt-get update; \
+    curl -L -o /tmp/ros2-apt-source.deb \
+      "https://github.com/ros-infrastructure/ros-apt-source/releases/latest/download/ros2-apt-source_$(. /etc/os-release && echo ${VERSION_CODENAME})_all.deb"; \
+    apt-get install -y /tmp/ros2-apt-source.deb; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-slam-toolbox \
@@ -9,8 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-nav2-map-server \
     ros-humble-nav2-bringup \
     ros-humble-nav2-costmap-2d \
-    ros-humble-nav2-amcl \
- && rm -rf /var/lib/apt/lists/*
+    ros-humble-nav2-amcl && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root/colcon_ws
 RUN mkdir -p src && \
@@ -27,13 +39,3 @@ RUN printf '%s\n' \
 
 ENTRYPOINT ["/ros_entry.sh"]
 CMD ["/bin/bash"]
-
-RUN apt-get update && apt-get install -y --no-install-recommends git python3-vcstool && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /root/colcon_ws/src
-
-WORKDIR /root/colcon_ws
-RUN source /opt/ros/humble/setup.bash && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y && \
-    colcon build --symlink-install
