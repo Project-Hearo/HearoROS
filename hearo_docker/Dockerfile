@@ -24,10 +24,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-nav2-bringup \
     ros-humble-nav2-costmap-2d \
     ros-humble-nav2-amcl && \
+    ros-humble-geometry-msgs \
+    ros-humble-tf2 \
+    ros-humble-tf2-ros \
+    ros-humble-tf2-geometry-msgs \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root/colcon_ws
 RUN mkdir -p src
+
+RUN gi clone https://github.com/robo-friends/m-explore-ros2.git src/m-explore-ros2
 
 RUN source /opt/ros/humble/setup.bash && \
     rosdep update && \
@@ -40,5 +46,5 @@ RUN printf '%s\n' \
   'export QT_X11_NO_MITSHM=1' \
   'exec "$@"' > /ros_entry.sh && chmod +x /ros_entry.sh
 
-ENTRYPOINT ["/ros_entry.sh"]
+ENTRYPOINT ["/bin/bash", "/ros_entry.sh"]
 CMD ["/bin/bash"]
