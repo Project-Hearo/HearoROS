@@ -23,17 +23,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-nav2-map-server \
     ros-humble-nav2-bringup \
     ros-humble-nav2-costmap-2d \
-    ros-humble-nav2-amcl && \
+    ros-humble-nav2-amcl \
     ros-humble-geometry-msgs \
     ros-humble-tf2 \
     ros-humble-tf2-ros \
     ros-humble-tf2-geometry-msgs \
-    rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root/colcon_ws
 RUN mkdir -p src
 
-RUN gi clone https://github.com/robo-friends/m-explore-ros2.git src/m-explore-ros2
+RUN git clone https://github.com/robo-friends/m-explore-ros2.git src/m-explore-ros2
+
+RUN bash -lc "source /opt/ros/humble/setup.bash && \
+  cd /root/colcon_ws/src && \
+  ros2 pkg create room2d_sim \
+    --build-type ament_python \
+    --dependencies rclpy sensor_msgs nav_msgs geometry_msgs tf2_ros tf_transformations"
 
 RUN source /opt/ros/humble/setup.bash && \
     rosdep update && \
