@@ -1,10 +1,12 @@
 FROM yahboomtechnology/ros-humble:4.1.2
 ENV DEBIAN_FRONTEND=noninteractive
-SHELL ["/bin/bash","-c"]
+SHELL ["/bin/bash","-lc"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates gnupg lsb-release && \
-    rm -rf /var/lib/apt/lists/*
+    curl ca-certificates gnupg lsb-release \
+    build-essential cmake git python3-pip \
+    python3-colcon-common-extensions python3-vcstool \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN set -e; \
     rm -f /etc/apt/sources.list.d/ros2* || true; \
@@ -33,18 +35,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /root/colcon_ws
 RUN mkdir -p src
 
-RUN git clone https://github.com/robo-friends/m-explore-ros2.git src/m-explore-ros2
+ARG GIT_REFRESH=initial
 
-RUN bash -lc "source /opt/ros/humble/setup.bash && \
-  cd /root/colcon_ws/src && \
-  ros2 pkg create room2d_sim \
-    --build-type ament_python \
-    --dependencies rclpy sensor_msgs nav_msgs geometry_msgs tf2_ros tf_transformations"
+RUN echo "GIT_REFRESH=${GIT_REFRESH}"
+RUN if [ ! -d src/m-explore-ros2 ]; then \
+      git clone --depth=1 https://github.com/robo-friends/m-explore-ros2.git src/m-explore-ros2; \
+    else \
+      git -C src/m-explore-ros2 fetch --depth=1 origin && git -C src/m-explore-ros2 reset --hard origin/HEAD; \
+    fi
 
-RUN source /opt/ros/humble/setup.bash && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y || true && \
-    colcon build --symlink-install || true
+RUN if [ ! -d src/room2d_sim ]; then \
+      source /opt/ros/humble/setup.bash; \
+      ros2 pkg create room2d_sim \
+        --build-type ament_python \
+        --dependencies rclpy sensor_msgs nav_msgs geometry_msgs tf2_ros tf_transformations; \
+    fi
+
+RUN set -e; \
+    source /opt/ros/humble/setup.bash; \
+    rosdep update; \
+    rosdep install --from-paths src --ignore-src -r -y --rosdistro humble
+
+RUN set -e; \
+    source /opt/ros/humble/setup.bash; \
+    colcon build --symlink-install --event-handlers console_direct+
+
 
 RUN printf '%s\n' \
   'source /opt/ros/humble/setup.bash' \
