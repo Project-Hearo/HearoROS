@@ -8,16 +8,6 @@ RUN set -eux; \
       ca-certificates curl gnupg lsb-release software-properties-common; \
     rm -rf /var/lib/apt/lists/*
 
-RUN set -eux; \
-    add-apt-repository -y universe; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-      build-essential cmake git python3-pip \
-      python3-colcon-common-extensions python3-vcstool \
-      python3-paho-mqtt; \
-    rm -rf /var/lib/apt/lists/*
-
-
 RUN set -e; \
     rm -f /etc/apt/sources.list.d/ros2* || true; \
     rm -f /usr/share/keyrings/ros-archive-keyring.gpg || true; \
@@ -27,7 +17,18 @@ RUN set -e; \
       "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.${VERSION_CODENAME}_all.deb"; \
     dpkg -i /tmp/ros2-apt-source.deb || true; \
     apt-get update; \
-    apt-get -f install -y && rm -rf /var/lib/apt/lists/*
+    apt-get -f install -y; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    add-apt-repository -y universe; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      build-essential cmake git python3-pip \
+      python3-colcon-common-extensions python3-vcstool \
+      python3-paho-mqtt; \
+    rm -rf /var/lib/apt/lists/*
+
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-slam-toolbox \
