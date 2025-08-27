@@ -2,11 +2,21 @@ FROM yahboomtechnology/ros-humble:4.1.2
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash","-lc"]
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates gnupg lsb-release \
-    build-essential cmake git python3-pip \
-    python3-colcon-common-extensions python3-vcstool \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl gnupg lsb-release software-properties-common; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    add-apt-repository -y universe; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      build-essential cmake git python3-pip \
+      python3-colcon-common-extensions python3-vcstool \
+      python3-paho-mqtt; \
+    rm -rf /var/lib/apt/lists/*
+
 
 RUN set -e; \
     rm -f /etc/apt/sources.list.d/ros2* || true; \
