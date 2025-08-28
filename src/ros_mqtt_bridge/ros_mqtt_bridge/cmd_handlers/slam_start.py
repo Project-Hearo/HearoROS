@@ -18,9 +18,9 @@ class SlamStartHandler(CommandHandler):
         super().__init__(node)
         self.ac = ActionClient(node, SlamSession, 'slam/session')
         
-        self.upload_url = getattr(node, "upload_url", "https://<주소>/<메서드>")
-        self.map_dir = Path(getattr(node, "map_dir", "/data/maps"))  # SLAM 저장 경로
-        self.upload_token = getattr(node ,"upload_token", None)
+        self.upload_url = getattr(node, "upload_url", "https://<주소>/<메서드>") #map을 어디에 올릴지 url이 필요하다.
+        self.map_dir = Path(getattr(node, "map_dir", "/data/maps"))  #저장 경로 설정이 필요하다.
+        self.upload_token = getattr(node ,"upload_token", None) #토큰은 아마 없어도 될 거 같긴하다
         
         self.upload_cli = self.node.create_client(MapUpload, '/map_uploader/upload')
         self._goals = {}
