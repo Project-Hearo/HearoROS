@@ -46,6 +46,6 @@ class LocationTelemetry(TelemetryHandler):
                 "frame_id":"map",
             })
         except Exception as e:
-            self.get_logger().warn(f"Tranform failed: {e}")
+            self.node.get_logger().warn(f"Tranform failed: {e}")
         
     
