@@ -1,8 +1,6 @@
 # Goal
-string session_id
 bool save_map
 string map_name
-float32 duration_sec
 ---
 # Result
 bool success
