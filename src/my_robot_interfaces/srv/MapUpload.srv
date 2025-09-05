@@ -3,8 +3,10 @@
 string map_name
 string pgm_path
 string yaml_path
-string upload_url
+string pgm_upload_url
+string yaml_upload_url
 string token
+string notify_url
 ---
 bool ok
 string code
