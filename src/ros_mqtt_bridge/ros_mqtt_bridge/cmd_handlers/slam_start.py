@@ -36,10 +36,10 @@ class SlamStartHandler(CommandHandler):
         self.ac = ActionClient(node, SlamSession, 'slam/session')
 
         # 업로드·경로 설정
-        self.pgm_upload_url = config.pgm_upload_url or getattr(node, "pgm_upload_url", "")
-        self.yaml_upload_url = config.yaml_upload_url or getattr(node, "yaml_upload_url", "")
-        self.post_url = config.post_url or getattr(node, "post_url", "")
-        self.upload_token = config.upload_token or getattr(node, "upload_token", "")
+        self.pgm_upload_url = config.PGM_UPLOAD_URL or getattr(node, "pgm_upload_url", "")
+        self.yaml_upload_url = config.YAML_UPLOAD_URL or getattr(node, "yaml_upload_url", "")
+        self.post_url = config.POST_URL or getattr(node, "post_url", "")
+        self.upload_token = config.MAP_UPLOAD_TOKEN or getattr(node, "upload_token", "")
 
         self.map_dir_pgm = Path(getattr(node, "map_dir_pgm", "/root/maps/pgm"))
         self.map_dir_yaml = Path(getattr(node, "map_dir_yaml", "/root/maps/yaml"))
