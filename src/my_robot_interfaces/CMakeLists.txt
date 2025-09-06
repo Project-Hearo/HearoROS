@@ -16,6 +16,7 @@ find_package(builtin_interfaces REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "srv/MapUpload.srv"
   "srv/RobotStatus.srv"
   "action/SlamSession.action"
   DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
