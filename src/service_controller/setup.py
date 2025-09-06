@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'map_uploader = map_uploader.map_uploader:main',
+            'map_uploader = service_controller.map_uploader:main',
         ],
     },
 )
