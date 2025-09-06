@@ -138,13 +138,38 @@ class SlamAction(Node):
         except Exception as e:
             self.get_logger().warn(f"YAML image patch failed: {e}")
     def _call_save_map(self, base_path: str, fmt: str = "pgm", timeout_sec: float = 10.0):
-        if not self.save_map_cli.wait_for_service(timeout_sec=5.0):
+        if not self.save_map_cli.wait_for_service(timeout_sec=15.0):
             self.get_logger().error("save_map service not available")
             return None
 
         req = SaveMap.Request()
-        req.name   = RosString(data=base_path)
-        req.format = RosString(data=fmt)
+
+        def _assign_field(msg, field: str, value: str) -> bool:
+            if not hasattr(msg, field):
+                return False
+            attr = getattr(msg, field)
+            try:
+                setattr(msg, field, value)
+                return True
+            except Exception:
+                try:
+                    if hasattr(attr, "data"):
+                        attr.data = value
+                        return True
+                except Exception:
+                    pass
+            return False
+
+        set_name = (
+            _assign_field(req, "name", base_path) or
+            _assign_field(req, "filename", base_path) or
+            _assign_field(req, "map_file_name", base_path)
+        )
+        if not set_name:
+            self.get_logger().error("SaveMap request has no known 'name' field (name/filename/map_file_name)")
+            return False
+
+        _assign_field(req, "format", fmt)
 
         fut = self.save_map_cli.call_async(req)
         deadline = time.monotonic() + timeout_sec
@@ -170,6 +195,7 @@ class SlamAction(Node):
         if msg:
             (self.get_logger().info if ok else self.get_logger().error)(f"save_map response: {msg}")
         return ok
+
     
     def _save_map_to_split_dirs(self, map_name: str) -> Optional[Tuple[str, str]]:
         
