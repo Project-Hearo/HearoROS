@@ -24,7 +24,7 @@ class SlamAction(Node):
     def __init__(self):
         super().__init__('slam_action_server')
         
-        self.declare_parameter('frontiers_topic', '/explore/frontiers')
+        self.declare_parameter('frontiers_topic', 'explore/frontiers')
         self.declare_parameter('zero_hold_sec', 5.0)
         self.declare_parameter('feedback_period', 0.2)
         self.declare_parameter('simulate_progress', False)
