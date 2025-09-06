@@ -64,23 +64,47 @@ class SlamAction(Node):
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=10
         )
-        topic = self.get_parameter('frontiers_topic').get_parameter_value().string_value
-        self.sub_pose = self.create_subscription(
-            PoseArray,              # MarkerArray로 바꿀 경우 여기 타입 변경
-            topic,
-            self.on_frontiers,
-            qos,
-            callback_group=self.cb_group
-        )
-        # self.sub_marker = self.create_subscription(
-        #     MarkerArray,              
-        #     topic,
-        #     self.on_frontiers_ㅡㅁ==,
-        #     qos,
-        #     callback_group=self.cb_group
-        # )
         
-        #해당 이름으로 ActionServer발행
+        topic = self.get_parameter('frontiers_topic').get_parameter_value().string_value
+
+        def _subscribe_pose():
+            self.sub_pose = self.create_subscription(
+                PoseArray, topic, self.on_frontiers, qos, callback_group=self.cb_group
+            )
+            self.get_logger().info(f"Subscribing frontiers (PoseArray) on: {self.resolve_topic_name(topic)}")
+
+        def _subscribe_marker():
+            self.sub_marker = self.create_subscription(
+                MarkerArray, topic, self.on_frontiers_marker, qos, callback_group=self.cb_group
+            )
+            self.get_logger().info(f"Subscribing frontiers (MarkerArray) on: {self.resolve_topic_name(topic)}")
+
+
+        resolved = self.resolve_topic_name(topic)
+        types_map = dict(self.get_topic_names_and_types())
+        types = types_map.get(resolved, [])
+
+        if 'geometry_msgs/msg/PoseArray' in types and 'visualization_msgs/msg/MarkerArray' in types:
+    
+            _subscribe_pose()
+        elif 'geometry_msgs/msg/PoseArray' in types:
+            _subscribe_pose()
+        elif 'visualization_msgs/msg/MarkerArray' in types:
+            _subscribe_marker()
+        else:
+    
+            self.get_logger().warning(f"No publishers yet on {resolved}; will auto-detect...")
+            def _retry_auto():
+                types_map = dict(self.get_topic_names_and_types())
+                types = types_map.get(resolved, [])
+                if 'geometry_msgs/msg/PoseArray' in types:
+                    _subscribe_pose()
+                    self.auto_retry_timer.cancel()
+                elif 'visualization_msgs/msg/MarkerArray' in types:
+                    _subscribe_marker()
+                    self.auto_retry_timer.cancel()
+            self.auto_retry_timer = self.create_timer(2.0, _retry_auto, callback_group=self.cb_group)
+
         self.server = ActionServer(
             self,
             SlamSession,
