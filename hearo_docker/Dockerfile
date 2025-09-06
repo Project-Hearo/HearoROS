@@ -2,15 +2,6 @@ FROM yahboomtechnology/ros-humble:4.1.2
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash","-lc"]
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-requests \
-    python3-boto3 \
-    ros-humble-tf2-msgs \
-    ros-humble-sensor-msgs \
-    ros-humble-nav-msgs \
- && rm -rf /var/lib/apt/lists/*
-
-
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -31,7 +22,7 @@ RUN set -e; \
 
 RUN set -eux; \
     add-apt-repository -y universe; \
-    apt-get update; \
+    apt-get update --fix-missing; \
     apt-get install -y --no-install-recommends \
       build-essential cmake git python3-pip \
       python3-colcon-common-extensions python3-vcstool \
@@ -39,7 +30,12 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends \
+    python3-requests \
+    python3-boto3 \
+    # ros-humble-tf2-msgs \
+    # ros-humble-sensor-msgs \
+    # ros-humble-nav-msgs \
     ros-humble-slam-toolbox \
     ros-humble-rviz2 \
     ros-humble-nav2-map-server \
