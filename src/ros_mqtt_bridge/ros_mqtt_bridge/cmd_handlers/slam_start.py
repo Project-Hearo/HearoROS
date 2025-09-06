@@ -24,6 +24,8 @@ class SlamStartHandler(CommandHandler):
     def __init__(self, node):
         super().__init__(node)
 
+        self.proc_mapping = None
+        self.proc_nav = None
         # 런치 서비스: 매핑 스택 / 네비 스택 분리
         self.ls_mapping = None    # slam_toolbox + explore_lite + nav2(slam:=True)
         self.ls_nav = None        # nav2(map:=..., slam:=False)
@@ -67,8 +69,12 @@ class SlamStartHandler(CommandHandler):
 
     def _run_async_in_process(self, coro_fn, *args, name: str = None):
         def _runner():
-            asyncio.run(coro_fn(*args))
-        proc = mp.Process(target=_runner, deamon=True, name=name or "launch-proc")
+            try:
+                asyncio.run(coro_fn(*args))
+            except Exception as e:
+                import traceback
+                print(f"[LaunchRunner-{name}] crashed: {e}\m{traceback.format_exc()}")
+        proc = mp.Process(target=_runner, daemon=True, name=name or "launch-proc")
         
         proc.start()
         return proc
@@ -159,9 +165,9 @@ class SlamStartHandler(CommandHandler):
         args = args or {}
 
         # 매핑 스택이 안 떠 있으면 기동
-        if not self.is_mapping_running and self.ls_mapping is None:
+        if not (self.proc_mapping and self.proc_mapping.is_alive()):
             self.node.get_logger().info("Starting MAPPING stack: slam_toolbox + nav2(slam) + explore ...")
-            self._run_async_in_process(self._launch_mapping_stack, name="mapping-launch")
+            self.proc_mapping = self._run_async_in_process(self._launch_mapping_stack, name="mapping-launch")
 
         # SLAM 액션 서버 체크
         if not self.ac.wait_for_server(timeout_sec=8.0):
@@ -290,15 +296,17 @@ class SlamStartHandler(CommandHandler):
                 # === 전환: 매핑 스택 종료 → Nav2(맵기반) 기동 ===
                 # 1) Nav2(맵) 기동
                 self.node.get_logger().info(f"Starting NAV stack with map: {yaml}")
-                self._run_async_in_process(self._launch_nav_with_map, str(yaml), name="nav-launch")
+                if not (self.proc_nav and self.proc_nav.is_alive()):
+                    self.proc_nav = self._run_async_in_process(self._launch_nav_with_map, str(yaml), name="nav-launch")
 
-                # 2) 매핑 스택 종료 (slam/explore/nav2_slam)
-                if self.ls_mapping:
+                if self.proc_mapping and self.proc_mapping.is_alive():
                     self.node.get_logger().info("Shutting down MAPPING stack (slam/explore/nav2_slam)...")
                     try:
-                        self.ls_mapping.shutdown()
-                    except Exception:
-                        pass  # 이미 내려갔거나 종료 중일 수 있음
+                        self.proc_mapping.terminate()
+                        self.proc_mapping.join(timeout=2.0)
+                    finally:
+                        self.proc_mapping = None  
+
 
             future.add_done_callback(on_uploaded)
 
