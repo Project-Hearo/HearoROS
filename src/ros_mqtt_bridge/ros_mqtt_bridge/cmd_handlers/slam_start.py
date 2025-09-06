@@ -102,7 +102,7 @@ class SlamStartHandler(CommandHandler):
                 PythonLaunchDescriptionSource(
                     os.path.join(
                         get_package_share_directory('nav2_bringup'),
-                        'launch', 'bringup_launch.py'
+                        'launch', 'navigation_launch.py'
                     )
                 ),
                 # SLAM 모드로 기동 (map 인자 없이, slam:=True)
