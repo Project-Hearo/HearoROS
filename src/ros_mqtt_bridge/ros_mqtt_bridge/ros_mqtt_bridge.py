@@ -64,7 +64,7 @@ class RosMqttBridge(Node):
         # MQTT 콜백 스레드에서 받은 요청을 큐에 넣고, 타이머가 50Hz로 꺼내 디스패치
         self._q = deque()
         self._qlock = threading.Lock()
-        self.create_timer(0.02, self._process_queue)  #50Hz
+        self.create_timer(0.02, self._process_queue) #50Hz
 
         # 5초마다 backlog/q_max 등을 로그+MQTT로 송신한다.
         self.get_logger().info("RosMqttBridge up")
@@ -73,7 +73,7 @@ class RosMqttBridge(Node):
         self.create_timer(5.0, self._report_health)
         self._stop_timer = None # 모션 정지용 타이머 핸들 저장(핸들러에서 쓴다)
         
-        #핸들러 플러그인 자동 로드
+        #핸들러 플러그인 자동 드로
         self.dispatcher = Dispatcher(self, threaded=True, max_workers=2)
         self.dispatcher.load_plugins() # handlers/*.py를 스캔해 @register된 핸들러들을 인스턴스화 한다.
         

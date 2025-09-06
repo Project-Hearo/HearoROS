@@ -6,7 +6,7 @@ string yaml_path
 string pgm_upload_url
 string yaml_upload_url
 string token
-string notify_url
+string post_url
 ---
 bool ok
 string code
