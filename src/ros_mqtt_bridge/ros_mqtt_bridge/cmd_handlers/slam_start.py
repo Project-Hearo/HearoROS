@@ -1,6 +1,6 @@
 from .base import CommandHandler
 from .registry import register
-
+import math
 from rclpy.action import ActionClient
 from my_robot_interfaces.action import SlamSession
 from my_robot_interfaces.srv import MapUpload
@@ -161,6 +161,7 @@ class SlamStartHandler(CommandHandler):
     # -------------------------
     # 명령 처리
     # -------------------------
+    
     def handle(self, req_id, args):
         args = args or {}
 
@@ -181,13 +182,27 @@ class SlamStartHandler(CommandHandler):
         sid  = str(uuid.uuid4())[:8]
         base = str(args.get('map_name', f"HearoMap-{time.strftime('%Y%m%d-%H%M%S')}-{sid}"))
         goal.map_name = base
-
+        def _yaw_from_quat(q):
+        # yaw = atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+            return math.atan2(2.0*(q.w*q.z + q.x*q.y), 1.0 - 2.0*(q.y*q.y + q.z*q.z))
         def feedback_callback(fb):
             f = getattr(fb, "feedback", fb)
+
+            x = y = theta = 0.0
+            ps = getattr(f, "pose", None)  # PoseStamped
+            if ps and hasattr(ps, "pose"):
+                x = getattr(ps.pose.position, "x", 0.0)
+                y = getattr(ps.pose.position, "y", 0.0)
+                q = getattr(ps.pose, "orientation", None)
+            if q:
+                theta = _yaw_from_quat(q)
+
             self.node._publish_feedback(req_id, {
-                "pose": {"x": f.pose.x, "y": f.pose.y, "theta": f.pose.theta},
+                "pose": {"x": float(x), "y": float(y), "theta": float(theta)},
                 "progress": float(getattr(f, "progress", 0.0)),
                 "quality":  float(getattr(f, "quality",  0.0)),
+                # 서버에서 보낸 status 문자열도 있으면 실어주기
+                "status":   getattr(f, "status", ""),
             })
 
         send_future = self.ac.send_goal_async(goal, feedback_callback=feedback_callback)
