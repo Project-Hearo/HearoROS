@@ -9,7 +9,7 @@ from ros_mqtt_bridge import config
 from pathlib import Path
 import uuid, time
 import threading
-
+import multiprocessing as mp
 import os, asyncio
 from launch import LaunchService
 from launch.actions import IncludeLaunchDescription
@@ -65,12 +65,13 @@ class SlamStartHandler(CommandHandler):
                 self.node._publish_feedback(req_id, {"phase": "waiting_upload_service"})
         return False
 
-    def _run_async_in_thread(self, coro_fn, *args, name: str = None):
+    def _run_async_in_process(self, coro_fn, *args, name: str = None):
         def _runner():
             asyncio.run(coro_fn(*args))
-        th = threading.Thread(target=_runner, daemon=True, name=name or "launch-thread")
-        th.start()
-        return th
+        proc = mp.Process(target=_runner, deamon=True, name=name or "launch-proc")
+        
+        proc.start()
+        return proc
 
     # -------------------------
     # 런치 스택: 매핑(탐색)용
@@ -160,7 +161,7 @@ class SlamStartHandler(CommandHandler):
         # 매핑 스택이 안 떠 있으면 기동
         if not self.is_mapping_running and self.ls_mapping is None:
             self.node.get_logger().info("Starting MAPPING stack: slam_toolbox + nav2(slam) + explore ...")
-            self._run_async_in_thread(self._launch_mapping_stack, name="mapping-launch")
+            self._run_async_in_process(self._launch_mapping_stack, name="mapping-launch")
 
         # SLAM 액션 서버 체크
         if not self.ac.wait_for_server(timeout_sec=8.0):
@@ -289,7 +290,7 @@ class SlamStartHandler(CommandHandler):
                 # === 전환: 매핑 스택 종료 → Nav2(맵기반) 기동 ===
                 # 1) Nav2(맵) 기동
                 self.node.get_logger().info(f"Starting NAV stack with map: {yaml}")
-                self._run_async_in_thread(self._launch_nav_with_map, str(yaml), name="nav-launch")
+                self._run_async_in_process(self._launch_nav_with_map, str(yaml), name="nav-launch")
 
                 # 2) 매핑 스택 종료 (slam/explore/nav2_slam)
                 if self.ls_mapping:
