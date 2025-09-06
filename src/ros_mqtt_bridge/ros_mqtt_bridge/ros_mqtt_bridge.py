@@ -22,14 +22,14 @@ QOS_KEEP_LAST_1 = QoSProfile(
 class RosMqttBridge(Node):
     def __init__(self):
         # ros_mqtt_bridge 노드 발행
-        super().__init__    ('ros_mqtt_bridge')
+        super().__init__('ros_mqtt_bridge')
         # config.json파일에 있는 정보를 이용해서 mqtt서버에 연결을 시도한다.
 
         self.robot_id    = config.ROBOT_ID
         self.broker_host = config.MQTT_SERVER
-        self.broker_port = config.MQTT_PORT
-        self.socket_port = config.MQTT_SOCKET_PORT
-        self.keepalive   = config.KEEPALIVE
+        self.broker_port = int(config.MQTT_PORT)
+        self.socket_port = int(config.MQTT_SOCKET_PORT)
+        self.keepalive   = int(config.KEEPALIVE)
 
         # ---- mqtt topics ----
         # 명령은 robot/<id>/cmd/<리소스>/<액션>
