@@ -270,19 +270,51 @@ class SlamAction(Node):
             if now - start_t < startup_grace:
                 pass  
             elif self.last_msg_time == 0.0 and (now - start_t) > no_msg_abort:
-                self.get_logger().warn("no frontiers first message timeout")
-                goal_handle.abort()
-                result.success = False
-                result.map_path = ""
-                result.message = "no frontiers message timeout (never received)"
-                return result
+                self.get_logger().warning("no frontiers first message timeout")
+                
+                if save_map:
+                    pair = self._save_map_to_split_dirs(map_name)
+                    if pair is None:
+                        goal_handle.abort()
+                        result.success = False
+                        result.map_path = ""
+                        result.message = "timeout: save_map failed"
+                        return result
+                    final_pgm, final_yaml = pair
+                    goal_handle.succeed()
+                    result.success = True
+                    result.map_path = final_pgm
+                    result.message = "timeout: no frontiers first msg → map saved"
+                    return result
+                else:
+                    goal_handle.succeed()
+                    result.success = True
+                    result.map_path = ""
+                    result.message = "timeout: no frontiers first msg"
+                    return result
             elif self.last_msg_time > 0.0 and (now - self.last_msg_time) > no_msg_abort:
-                self.get_logger().warn("frontiers stalled timeout")
-                goal_handle.abort()
-                result.success = False
-                result.map_path = ""
-                result.message = "no frontiers message timeout (stalled)"
-                return result
+                self.get_logger().warning("frontiers stalled timeout")
+                if save_map:
+                    pair = self._save_map_to_split_dirs(map_name)
+                    if pair is None:
+                        goal_handle.abort()
+                        result.success = False
+                        result.map_path = ""
+                        result.message = "timeout(stalled): save_map failed"
+                        return result
+                    final_pgm, final_yaml = pair
+                    goal_handle.succeed()
+                    result.success = True
+                    result.map_path = final_pgm
+                    result.message = "timeout(stalled): map saved"
+                    return result
+                else:
+                    goal_handle.succeed()
+                    result.success = True
+                    result.map_path = ""
+                    result.message = "timeout(stalled)"
+                    return result
+
 
             done, left = self._is_mapping_done(zero_hold_sec)
 
