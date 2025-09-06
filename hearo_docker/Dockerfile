@@ -2,6 +2,15 @@ FROM yahboomtechnology/ros-humble:4.1.2
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash","-lc"]
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-requests \
+    python3-boto3 \
+    ros-humble-tf2-msgs \
+    ros-humble-sensor-msgs \
+    ros-humble-nav-msgs \
+ && rm -rf /var/lib/apt/lists/*
+
+
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -42,6 +51,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-tf2-ros \
     ros-humble-tf2-geometry-msgs \
  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/colcon_ws/src
+COPY ./service_controller ./service_controller
+COPY ./action_controller ./action_controller
 
 WORKDIR /root/colcon_ws
 RUN mkdir -p src
