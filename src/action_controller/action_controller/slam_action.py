@@ -10,6 +10,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.time import Time
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from my_robot_interfaces.action import SlamSession
 
@@ -27,7 +28,9 @@ class SlamAction(Node):
         self.declare_parameter('zero_hold_sec', 5.0)
         self.declare_parameter('feedback_period', 0.2)
         self.declare_parameter('simulate_progress', False)
-        self.declare_parameter('no_msg_timeout_sec', 10.0)
+        self.declare_parameter('no_msg_timeout_sec', 20.0)
+        self.declare_parameter('startup_grace_sec', 60.0)   
+        self.declare_parameter('no_msg_abort_sec', 60.0)
         self.declare_parameter('global_frame', 'map')
         self.declare_parameter('base_frame', 'base_link')
         
@@ -52,13 +55,19 @@ class SlamAction(Node):
         self.frontier_count: Optional[int] = None
         self.zero_since: Optional[float] = None
         self.last_msg_time: float = time.monotonic()
-    
+        self.started_at: float = 0.0
+        qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
         topic = self.get_parameter('frontiers_topic').get_parameter_value().string_value
         self.sub = self.create_subscription(
             PoseArray,              # MarkerArray로 바꿀 경우 여기 타입 변경
             topic,
             self.on_frontiers,
-            10,
+            qos,
             callback_group=self.cb_group
         )
         
@@ -226,16 +235,29 @@ class SlamAction(Node):
         map_name = goal.map_name
         feedback = SlamSession.Feedback()
         result = SlamSession.Result()
-        
-        zero_hold_sec = float(self.get_parameter('zero_hold_sec').value)
-        feedback_period = float(self.get_parameter('feedback_period').value)
-        simulate_progress = bool(self.get_parameter('simulate_progress').value)
-        no_msg_timeout = float(self.get_parameter('no_msg_timeout_sec').value)
-        
+
+        zero_hold_sec    = float(self.get_parameter('zero_hold_sec').value)
+        feedback_period  = float(self.get_parameter('feedback_period').value)
+        simulate_progress= bool(self.get_parameter('simulate_progress').value)
+        no_msg_timeout   = float(self.get_parameter('no_msg_timeout_sec').value)
+
+        try:
+            startup_grace = float(self.get_parameter('startup_grace_sec').value)
+        except Exception:
+            startup_grace = 60.0
+        try:
+            no_msg_abort = float(self.get_parameter('no_msg_abort_sec').value)
+        except Exception:
+            no_msg_abort = max(180.0, no_msg_timeout)
+
+        start_t = time.monotonic()
+        self.last_msg_time = 0.0  
 
         progress = 0.0
-        
+
         while rclpy.ok():
+            now = time.monotonic()
+
             if goal_handle.is_cancel_requested:
                 goal_handle.canceled()
                 self.get_logger().info("SlamAction: 작업 취소됨")
@@ -243,33 +265,52 @@ class SlamAction(Node):
                 result.map_path = ""
                 result.message = "canceled"
                 return result
-            
-            if time.monotonic() - self.last_msg_time > no_msg_timeout:
-                self.get_logger().warn("종료로 판정")
+
+        
+            if now - start_t < startup_grace:
+                pass  
+            elif self.last_msg_time == 0.0 and (now - start_t) > no_msg_abort:
+                self.get_logger().warn("no frontiers first message timeout")
                 goal_handle.abort()
                 result.success = False
                 result.map_path = ""
-                result.message = "no frontiers message timeout"
+                result.message = "no frontiers message timeout (never received)"
                 return result
-            
+            elif self.last_msg_time > 0.0 and (now - self.last_msg_time) > no_msg_abort:
+                self.get_logger().warn("frontiers stalled timeout")
+                goal_handle.abort()
+                result.success = False
+                result.map_path = ""
+                result.message = "no frontiers message timeout (stalled)"
+                return result
+
             done, left = self._is_mapping_done(zero_hold_sec)
-            
+
             if simulate_progress and progress < 1.0:
                 progress = min(1.0, progress + 0.01)
-            
+
             pose = self._get_robot_pose()
             if pose is not None:
                 self.last_pose = pose
             feedback.pose = self.last_pose if self.last_pose is not None else PoseStamped()
             feedback.progress = progress
             feedback.quality = 0.0
-            feedback.status = f"frontiers={self.frontier_count if self.frontier_count is not None else -1}, zero_hold_left={max(0.0, left):.2f}s"
+
+        
+            status_bits = []
+            if now - start_t < startup_grace:
+                status_bits.append("grace")
+            status_bits.append(f"frontiers={self.frontier_count if self.frontier_count is not None else -1}")
+            status_bits.append(f"zero_hold_left={max(0.0, left):.2f}s")
+            feedback.status = " | ".join(status_bits)
+
             goal_handle.publish_feedback(feedback)
-            
+
             if done:
                 break
-            
+
             time.sleep(feedback_period)
+
         if save_map:
             pair = self._save_map_to_split_dirs(map_name)
             if pair is None:
@@ -284,12 +325,13 @@ class SlamAction(Node):
             result.message = "mapping done and map saved"
             result.map_path = final_pgm
             return result
-        else: 
+        else:
             goal_handle.succeed()
             result.success = True
             result.message = "mapping done (save_map=false)"
             result.map_path = ""
             return result
+
             
     def _is_mapping_done(self, hold_sec: float):
         if self.frontier_count is None:
