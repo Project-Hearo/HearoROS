@@ -72,13 +72,13 @@ class SlamAction(Node):
             qos,
             callback_group=self.cb_group
         )
-        self.sub_marker = self.create_subscription(
-            MarkerArray,              
-            topic,
-            self.on_frontiers_marker,
-            qos,
-            callback_group=self.cb_group
-        )
+        # self.sub_marker = self.create_subscription(
+        #     MarkerArray,              
+        #     topic,
+        #     self.on_frontiers_ㅡㅁ==,
+        #     qos,
+        #     callback_group=self.cb_group
+        # )
         
         #해당 이름으로 ActionServer발행
         self.server = ActionServer(
