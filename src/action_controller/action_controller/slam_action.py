@@ -18,6 +18,8 @@ from geometry_msgs.msg import PoseArray, PoseStamped
 from tf2_ros import Buffer, TransformListener, TransformException
 from rclpy.duration import Duration
 
+from std_msgs.msg import String as RosString
+from visualization_msgs.msg import MarkerArray
 
 
 class SlamAction(Node):
@@ -63,10 +65,17 @@ class SlamAction(Node):
             depth=10
         )
         topic = self.get_parameter('frontiers_topic').get_parameter_value().string_value
-        self.sub = self.create_subscription(
+        self.sub_pose = self.create_subscription(
             PoseArray,              # MarkerArray로 바꿀 경우 여기 타입 변경
             topic,
             self.on_frontiers,
+            qos,
+            callback_group=self.cb_group
+        )
+        self.sub_marker = self.create_subscription(
+            MarkerArray,              
+            topic,
+            self.on_frontiers_marker,
             qos,
             callback_group=self.cb_group
         )
@@ -105,29 +114,23 @@ class SlamAction(Node):
         except Exception as e:
             self.get_logger().warn(f"YAML image patch failed: {e}")
     def _call_save_map(self, base_path: str, fmt: str = "pgm", timeout_sec: float = 10.0):
-    
         if not self.save_map_cli.wait_for_service(timeout_sec=5.0):
             self.get_logger().error("save_map service not available")
             return None
-        
+
         req = SaveMap.Request()
-        
-        try:
-            req.name.data = base_path
-            req.format.data = fmt
-        except AttributeError:
-            req.name = base_path
-            req.format = fmt
-        
+        req.name   = RosString(data=base_path)
+        req.format = RosString(data=fmt)
+
         fut = self.save_map_cli.call_async(req)
         deadline = time.monotonic() + timeout_sec
         while rclpy.ok() and time.monotonic() < deadline and not fut.done():
             time.sleep(0.01)
-            
+
         if not fut.done():
             self.get_logger().error("save_map service call timeout")
             return False
-        
+
         try:
             res = fut.result()
         except Exception as e:
@@ -137,12 +140,11 @@ class SlamAction(Node):
         if res is None:
             self.get_logger().error("save_map service returned None")
             return False
-        ok = True
-        if hasattr(res, "success"):
-            ok = bool(res.success)
-        if hasattr(res, "message") and res.message:
-            log_fn = self.get_logger().info if ok else self.get_logger().error
-            log_fn(f"save_map response: {res.message}")
+
+        ok = bool(getattr(res, "success", True))
+        msg = getattr(res, "message", "")
+        if msg:
+            (self.get_logger().info if ok else self.get_logger().error)(f"save_map response: {msg}")
         return ok
     
     def _save_map_to_split_dirs(self, map_name: str) -> Optional[Tuple[str, str]]:
@@ -212,6 +214,15 @@ class SlamAction(Node):
         self.frontier_count = cnt
         self.last_msg_time = time.monotonic()
         
+        if cnt == 0:
+            if self.zero_since is None:
+                self.zero_since = time.monotonic()
+        else:
+            self.zero_since = None
+    def on_frontiers_marker(self, msg: MarkerArray):
+        cnt = len(getattr(msg, "markers", []))
+        self.frontier_count = cnt
+        self.last_msg_time = time.monotonic()
         if cnt == 0:
             if self.zero_since is None:
                 self.zero_since = time.monotonic()
