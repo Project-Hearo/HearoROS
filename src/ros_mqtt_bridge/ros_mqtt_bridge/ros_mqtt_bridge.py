@@ -12,7 +12,7 @@ import paho.mqtt.client as mqtt
 import time, json, threading
 from collections import deque
 import importlib.resources
-
+from ros_mqtt_bridge import config
 QOS_KEEP_LAST_1 = QoSProfile(
     reliability=ReliabilityPolicy.BEST_EFFORT,
     history=HistoryPolicy.KEEP_LAST,
@@ -22,14 +22,14 @@ QOS_KEEP_LAST_1 = QoSProfile(
 class RosMqttBridge(Node):
     def __init__(self):
         # ros_mqtt_bridge 노드 발행
-        super().__init__('ros_mqtt_bridge')
+        super().__init__    ('ros_mqtt_bridge')
         # config.json파일에 있는 정보를 이용해서 mqtt서버에 연결을 시도한다.
-        with importlib.resources.files('ros_mqtt_bridge').joinpath('config.json').open('r') as f:
-            cfg = json.load(f)
-        self.robot_id    = cfg['robot_id']
-        self.broker_host = cfg['broker_host']
-        self.broker_port = cfg['broker_port']
-        self.keepalive   = cfg.get('keepalive', 45) 
+
+        self.robot_id    = config.ROBOT_ID
+        self.broker_host = config.MQTT_SERVER
+        self.broker_port = config.MQTT_PORT
+        self.socket_port = config.MQTT_SOCKET_PORT
+        self.keepalive   = config.KEEPALIVE
 
         # ---- mqtt topics ----
         # 명령은 robot/<id>/cmd/<리소스>/<액션>

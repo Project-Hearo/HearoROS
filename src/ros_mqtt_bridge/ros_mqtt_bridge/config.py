@@ -10,6 +10,11 @@ for p in [_here, *_here.parents]:
         break
 
 
+ROBOT_ID = os.getenv("ROBOT_ID","")
+MQTT_SERVER = os.getenv("MQTT_SERVER", "")
+MQTT_PORT = os.getenv("MQTT_PORT", "")
+KEEPALIVE = os.getenv("KEEPALIVE", "")
+MQTT_SOCKET_PORT = os.getenv("MQTT_SOCKET_PORT", "")
 PGM_UPLOAD_URL   = os.getenv("PGM_UPLOAD_URL", "")
 YAML_UPLOAD_URL  = os.getenv("YAML_UPLOAD_URL", "")
 POST_URL         = os.getenv("POST_URL", "")
