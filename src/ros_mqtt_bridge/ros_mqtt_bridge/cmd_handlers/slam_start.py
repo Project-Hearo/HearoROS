@@ -9,12 +9,21 @@ from ros_mqtt_bridge import config
 from pathlib import Path
 import uuid, time
 
+import os, asyncio
+from launch import LaunchService
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
+
+
 @register
 class SlamStartHandler(CommandHandler):
     commands = ('slam/start',)
 
     def __init__(self, node):
         super().__init__(node)
+        self.launch_service = None
+        self.launch_task = None
         self.ac = ActionClient(node, SlamSession, 'slam/session')
         
         self.pgm_upload_url = config.pgm_upload_url or getattr(node, "pgm_upload_url", "")
@@ -48,9 +57,49 @@ class SlamStartHandler(CommandHandler):
             if req_id is not None:
                 self.node._publish_feedback(req_id, {"phase": "waiting_upload_service"})
         return False
+    async def _launch_stack(self):
+        slam = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory('slam_toolbox'),
+                    'launch',
+                    'online_async_launch.py'
+                )
+            ),
+            launch_arguments={'use_sim_time': 'false'}.items()
+        )
+
+        nav2 = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory('nav2_bringup'),
+                    'launch',
+                    'bringup_launch.py'
+                )
+            ),
+            launch_arguments={'use_sim_time': 'false'}.items()
+        )
+
+        explore = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory('explore_lite'),
+                    'launch',
+                    'explore.launch.py'
+                )
+            )
+        )
+
+        self.launch_service = LaunchService()
+        for desc in [slam, nav2, explore]:
+            self.launch_service.include_launch_description(desc)
+
+        await self.launch_service.run_async()
 
     def handle(self, req_id, args):
         args = args or {}
+        loop = asyncio.run_coroutine_threadsafe(self._launch_stack(), loop)
+        self.launch_task = loop.create_task(self._launch_stack())
 
         if not self.ac.wait_for_server(timeout_sec=8.0):
             self.node._publish_resp(req_id, ok=False,
@@ -168,8 +217,13 @@ class SlamStartHandler(CommandHandler):
                     "upload_code": getattr(srv_res, "code", ""),
                     "upload_response": getattr(srv_res, "upload_json", ""),
                 })
+                if self.launch_service:
+                    self.node.get_logger().info("Shutting down slam/nav2/explore...")
+                    self.launch_service.shutdown()
+                    self.launch_service = None
 
             future.add_done_callback(on_uploaded)
+
 
         except Exception as e:
             self.node._publish_resp(req_id, ok=False,

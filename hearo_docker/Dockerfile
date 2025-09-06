@@ -33,6 +33,7 @@ RUN set -eux; \
 RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends \
     python3-requests \
     python3-boto3 \
+    python3-dotenv \
     # ros-humble-tf2-msgs \
     # ros-humble-sensor-msgs \
     # ros-humble-nav-msgs \
