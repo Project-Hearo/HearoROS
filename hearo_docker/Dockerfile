@@ -52,9 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-tf2-geometry-msgs \
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /root/colcon_ws/src
-COPY ./service_controller ./service_controller
-COPY ./action_controller ./action_controller
+
 
 WORKDIR /root/colcon_ws
 RUN mkdir -p src
