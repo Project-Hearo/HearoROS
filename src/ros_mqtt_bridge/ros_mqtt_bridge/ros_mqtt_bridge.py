@@ -58,7 +58,7 @@ class RosMqttBridge(Node):
 
         # ---- ROS interfaces ----
         # status/get을 처리할 서비스 클라이언트 준비
-        self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', QOS_KEEP_LAST_1)
+        # self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', QOS_KEEP_LAST_1)
 
         # ---- command queue & timer (lightweight) ----
         # MQTT 콜백 스레드에서 받은 요청을 큐에 넣고, 타이머가 50Hz로 꺼내 디스패치
