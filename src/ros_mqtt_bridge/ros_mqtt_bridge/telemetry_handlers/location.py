@@ -4,7 +4,8 @@ from .base import TelemetryHandler
 from .registry import register_telemetry
 from tf2_geometry_msgs import do_transform_point
 from tf2_ros import Buffer, TransformListener
-
+from rclpy.time import Time
+from rclpy.duration import Duration
 @register_telemetry
 class LocationTelemetry(TelemetryHandler):
     name = "location"
@@ -13,7 +14,7 @@ class LocationTelemetry(TelemetryHandler):
         super().__init__(node, rate_hz=rate_hz)
         self.sub = None
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self.node)
+        self.tf_listener = TransformListener(self.tf_buffer, self.node, spin_thread=True)
         self.running = False
     
     def start(self):
@@ -31,12 +32,29 @@ class LocationTelemetry(TelemetryHandler):
             self.sub = None
             self.running = False
             
+    def _normalize_source_frame(self, frame_id: str) -> str:
+        if not frame_id:
+            return 'base_link'
+        aliases = {
+            'odom_frame': 'odom',
+            'odom_combined': 'odom',
+            'map_frame': 'map',
+            'basefootprint': 'base_footprint',
+        }
+        f = frame_id.strip()
+        return aliases.get(f,f)
+            
     def callback(self, msg: PointStamped):
         if not self.tick(): return
         try: 
-            tf = self.tf_buffer.lookup_transform(
-                'map', msg.header.frame_id, rclpy.time.Time()
-            )
+            target = 'map'
+            source = self._normalize_source_frame(msg.header.frame_id)
+            
+            if not self.tf_buffer.can_transform(target, source, Time(), timeout=Duration(seconds=0.2)):
+                self.node.get_logger().warn(f"TF not ready: {target} <- {source}")
+                return 
+            tf = self.tf_buffer.lookup_transform(target, source, Time(),
+                                             timeout=Duration(seconds=0.2))
             point_in_map = do_transform_point(msg, tf)
             self.node._publish_telemetry(
                 "location", {
@@ -46,6 +64,6 @@ class LocationTelemetry(TelemetryHandler):
                 "frame_id":"map",
             })
         except Exception as e:
-            self.node.get_logger().warn(f"Tranform failed: {e}")
+            self.node.get_logger().warn(f"Transform failed: {e}")
         
     
