@@ -47,22 +47,32 @@ class LocationTelemetry(TelemetryHandler):
     def callback(self, msg: PointStamped):
         if not self.tick(): return
         try: 
-            target = 'map'
             source = self._normalize_source_frame(msg.header.frame_id)
+            frame_out = None
+            point = None
             
-            if not self.tf_buffer.can_transform(target, source, Time(), timeout=Duration(seconds=0.2)):
-                self.node.get_logger().warn(f"TF not ready: {target} <- {source}")
-                return 
-            tf = self.tf_buffer.lookup_transform(target, source, Time(),
-                                             timeout=Duration(seconds=0.2))
-            point_in_map = do_transform_point(msg, tf)
+            if self.tf_buffer.can_transform('map', source, Time(), timeout=Duration(seconds=0.2)):
+                tf = self.tf_buffer.lookup_transform('map', source, Time(), timeout=Duration(seconds=0.2))
+                pt = do_transform_point(msg, tf)
+                frame_out = 'map'
+                point = pt.point
+
+            elif self.tf_buffer.can_transform('odom', source, Time(), timeout=Duration(seconds=0.2)):
+                tf = self.tf_buffer.lookup_transform('odom', source, Time(), timeout=Duration(seconds=0.2))
+                pt = do_transform_point(msg, tf)
+                frame_out = 'odom'
+                point = pt.point
+
+            else:
+                self.node.get_logger().warn(f"TF not ready: map/odom <- {source}, publish raw")
+                frame_out = source
+                point = msg.point
+                
             self.node._publish_telemetry(
-                "location", {
-                "x":point_in_map.point.x, 
-                "y": point_in_map.point.y, 
-                "z":point_in_map.point.z,
-                "frame_id":"map",
-            })
+                "location",
+                {"x": point.x, "y": point.y, "z": point.z, "frame_id": frame_out},
+                qos=1, retain=False
+            )
         except Exception as e:
             self.node.get_logger().warn(f"Transform failed: {e}")
         
