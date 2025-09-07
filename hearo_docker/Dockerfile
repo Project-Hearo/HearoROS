@@ -86,5 +86,9 @@ RUN printf '%s\n' \
   'export QT_X11_NO_MITSHM=1' \
   'exec "$@"' > /ros_entry.sh && chmod +x /ros_entry.sh
 
+SHELL ["/bin/bash", "-lc"]
+RUN echo 'source /opt/ros/humble/setup.bash' >> /etc/bash.bashrc \
+&& echo '[ -f /root/HearoROS/install/setup.bash ] && source /root/HearoROS/install/setup.bash' >> /etc/bash.bashrc
+
 ENTRYPOINT ["/bin/bash", "/ros_entry.sh"]
 CMD ["/bin/bash"]
