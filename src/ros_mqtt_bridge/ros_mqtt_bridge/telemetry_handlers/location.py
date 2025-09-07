@@ -14,7 +14,7 @@ class LocationTelemetry(TelemetryHandler):
         super().__init__(node, rate_hz=rate_hz)
         self.sub = None
         self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self.node, spin_thread=True)
+        self.tf_listener = TransformListener(self.tf_buffer, self.node, spin_thread=False)
         self.running = False
     
     def start(self):
