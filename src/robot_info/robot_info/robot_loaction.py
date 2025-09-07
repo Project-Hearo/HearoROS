@@ -2,7 +2,8 @@ import rclpy, time, math
 from rclpy.node import Node
 from geometry_msgs.msg import PointStamped
 from nav_msgs.msg import Odometry
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import qos_profile_sensor_data
+
 
 class RobotLocation(Node):
     def __init__(self):
@@ -17,11 +18,7 @@ class RobotLocation(Node):
         rate_hz    = float(self.get_parameter('rate_hz').value)
         
         self.pub = self.create_publisher(PointStamped, pub_topic, 10)
-        
-        qos = QoSProfile(depth=10,
-                 reliability=ReliabilityPolicy.BEST_EFFORT,
-                 history=HistoryPolicy.KEEP_LAST)
-        self.sub = self.create_subscription(Odometry, odom_topic, self._odom_cb, qos)
+        self.sub = self.create_subscription(Odometry, odom_topic, self._odom_cb, qos_profile_sensor_data)
         
         self.period = 1.0 / rate_hz if rate_hz > 0 else 0.0
         self._latest_odom = None

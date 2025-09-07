@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'robot_loaction = robot_info.robot_location:main' 
+            'robot_location = robot_info.robot_location:main' 
         ],
     },
 )
