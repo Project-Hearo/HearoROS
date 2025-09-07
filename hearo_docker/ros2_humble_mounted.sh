@@ -39,7 +39,7 @@ docker run -it --rm \
   --privileged \
   --net=host \
   --ipc=host \
-  --shm=size=512m \
+  --shm-size=512m \
   -e DISPLAY=$DISPLAY \
   -e ROS_DOMAIN_ID=20 \
   -e QT_X11_NO_MITSHM=1 \
