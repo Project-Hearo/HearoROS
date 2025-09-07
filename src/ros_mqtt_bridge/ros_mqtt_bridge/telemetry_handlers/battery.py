@@ -1,6 +1,8 @@
 from .base import TelemetryHandler
 from .registry import register_telemetry
 from std_msgs.msg import UInt16
+
+@register_telemetry
 class BatteryTelemetry(TelemetryHandler):
     name = "battery"
     
