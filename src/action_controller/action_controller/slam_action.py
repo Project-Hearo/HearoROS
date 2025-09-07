@@ -129,12 +129,12 @@ class SlamAction(Node):
         
             rel = os.path.relpath(str(pgm_path), start=str(yaml_path.parent))
         
-            new = re.sub(r'(^\s*image\s*:\s*).*$',
-                     rf'\1{rel}',
-                     txt, flags=re.MULTILINE)
-            if new != txt:
-                yaml_path.write_text(new, encoding='utf-8')
-                self.get_logger().info(f"Patched YAML image -> {rel}")
+            # new = re.sub(r'(^\s*image\s*:\s*).*$',
+            #          rf'\1{rel}',
+            #          txt, flags=re.MULTILINE)
+            # if new != txt:
+            #     yaml_path.write_text(new, encoding='utf-8')
+            #     self.get_logger().info(f"Patched YAML image -> {rel}")
         except Exception as e:
             self.get_logger().warn(f"YAML image patch failed: {e}")
     def _call_save_map(self, base_path: str, fmt: str = "pgm", timeout_sec: float = 10.0):
