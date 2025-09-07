@@ -255,7 +255,7 @@ class SlamStartHandler(CommandHandler):
 
             if not goal.save_map:
                 # 업로드 스킵 케이스: 결과만 알리고 매핑 스택은 유지(원하면 외부에서 stop)
-                self.node._publish_result(req_id, data={
+                self.node._publish_result(req_id, resule={
                     "success": True,
                     "message": "SLAM finished (no upload)",
                     "map_files": [str(pgm), str(yaml)],
@@ -300,7 +300,7 @@ class SlamStartHandler(CommandHandler):
                     return
 
                 # 업로드 성공 응답
-                self.node._publish_result(req_id, data={
+                self.node._publish_result(req_id, result={
                     "success": True,
                     "message": getattr(srv_res, "message", "SLAM finished and uploaded"),
                     "map_files": [str(pgm), str(yaml)],
