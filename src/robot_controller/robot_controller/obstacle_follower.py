@@ -115,6 +115,31 @@ class ObstacleFollower(Node):
         if len(cur) >= min_pts: clusters.append(cur)
 
         if not clusters:
+            idxs = np.where(mask)[0]
+            if idxs.size > 0:
+                i_min = idxs[int(np.argmin(r[idxs]))]
+                dist = float(r[i_min])
+                angle_deg = float(ang[i_min])
+
+                # 너무 가까우면 전진 금지
+                standoff = float(self.get_parameter('standoff').value)
+                cmd.linear.x  = self.pid_lin(standoff, dist)
+                cmd.angular.z = self.pid_ang(0.0, angle_deg)
+
+                lin_max = float(self.get_parameter('lin_max').value)
+                ang_max = float(self.get_parameter('ang_max').value)
+                cmd.linear.x  = clip(cmd.linear.x, -lin_max, lin_max)
+                cmd.angular.z = clip(cmd.angular.z, -ang_max, ang_max)
+                if dist < (standoff * 0.6):
+                    cmd.linear.x = min(cmd.linear.x, 0.0)
+                    self.pub_state.publish(String(data='too_close(fallback_point)'))
+                else:
+                    self.pub_state.publish(String(data='tracking(fallback_point)'))
+
+                self.pub_angle.publish(Float32(data=angle_deg))
+                self.pub_dist.publish(Float32(data=dist))
+                self.pub_cmd.publish(cmd)
+                return
             if bool(self.get_parameter('search_when_none').value):
                 cmd.angular.z = float(self.get_parameter('search_omega').value)
                 self.pub_state.publish(String(data='searching'))
