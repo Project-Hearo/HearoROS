@@ -90,12 +90,10 @@ class ObstacleFollower(Node):
         front = float(self.get_parameter('front_cone_deg').value)
         mask = valid & (np.abs(ang) <= front)
         if not np.any(mask):
-            # 후보 없음: 탐색 모드 또는 정지
-            if bool(self.get_parameter('search_when_none').value):
-                cmd.angular.z = float(self.get_parameter('search_omega').value)
-                self.pub_state.publish(String(data='searching'))
-            else:
-                self.pub_state.publish(String(data='no_points'))
+    # 탐색 제거: 정지
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.0
+            self.pub_state.publish(String(data='no_points'))
             self.pub_cmd.publish(cmd); return
 
         # 연속 빔 클러스터링
@@ -140,11 +138,9 @@ class ObstacleFollower(Node):
                 self.pub_dist.publish(Float32(data=dist))
                 self.pub_cmd.publish(cmd)
                 return
-            if bool(self.get_parameter('search_when_none').value):
-                cmd.angular.z = float(self.get_parameter('search_omega').value)
-                self.pub_state.publish(String(data='searching'))
-            else:
-                self.pub_state.publish(String(data='no_clusters'))
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.0
+            self.pub_state.publish(String(data='no_clusters'))
             self.pub_cmd.publish(cmd); return
 
         # 클러스터 통계
