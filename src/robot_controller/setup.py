@@ -11,7 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'numpy', 'opencv-python'],
     zip_safe=True,
     maintainer='root',
     maintainer_email='root@todo.todo',
@@ -20,6 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'person_fusion_follower = robot_controller.person_fusion_follower:main',
+            'robot_tracker = robot_controller.robot_tracker:main'
         ],
     },
 )
