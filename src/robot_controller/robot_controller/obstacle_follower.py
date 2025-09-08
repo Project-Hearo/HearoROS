@@ -32,7 +32,7 @@ class ObstacleFollower(Node):
         self.pub = self.create_publisher(Twist, '/cmd_vel', qos)
 
         # params
-        self.declare_parameter('front_cone_deg', 45.0)      # 추종 후보 각도 범위(±)
+        self.declare_parameter('front_cone_deg', 10.0)      # 추종 후보 각도 범위(±)
         self.declare_parameter('standoff', 0.8)             # 유지 거리(m)
         self.declare_parameter('min_valid', 0.10)           # 너무 가까운 잡신호 컷(m)
         self.declare_parameter('max_valid', 6.0)            # 최대 유효 거리
