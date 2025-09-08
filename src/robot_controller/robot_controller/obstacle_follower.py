@@ -123,7 +123,7 @@ class ObstacleFollower(Node):
 
                 # 너무 가까우면 전진 금지
                 standoff = float(self.get_parameter('standoff').value)
-                cmd.linear.x  = self.pid_lin(standoff, dist)
+                cmd.linear.x  = self.pid_lin(dist, standoff)
                 cmd.angular.z = self.pid_ang(0.0, angle_deg)
 
                 lin_max = float(self.get_parameter('lin_max').value)
@@ -170,7 +170,7 @@ class ObstacleFollower(Node):
 
         # 제어
         standoff = float(self.get_parameter('standoff').value)
-        cmd.linear.x  = self.pid_lin(standoff, dist)
+        cmd.linear.x  = self.pid_lin(dist, standoff)
         cmd.angular.z = self.pid_ang(0.0, angle_deg)
 
         # 속도 제한
