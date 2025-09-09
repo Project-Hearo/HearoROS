@@ -7,7 +7,6 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 class CameraInfo(Node):
     def __init__(self):
         super().__init__('camera_info')
-        
         self.declare_parameter('input_topic', '/image_raw')
         self.declare_parameter('output_topic', '/image_raw_refine')
         self.declare_parameter('rate_hz', 10.0)
