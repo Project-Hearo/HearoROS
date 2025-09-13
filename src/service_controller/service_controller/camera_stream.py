@@ -203,7 +203,7 @@ class RtspStream(Node):
         self.rtsp_proc = subprocess.Popen(
             shlex.split(cmd),
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,   
+            stdout=subprocess.PIPE,   
             stderr=subprocess.STDOUT,
             bufsize=0
         )
