@@ -58,8 +58,6 @@ class RtspStream(Node):
         self.timer = self.create_timer(2.0, self._watchdog)  
         self.srv = self.create_service(SetBool, 'control', self._on_control)
 
-        self.ffmpeg_ready = threading.Event()
-        self.rtsp_log_thread = None
         if self.get_parameter('autostart').value:
             ok, msg = self.start_stream()
             self.get_logger().info(f'autostart: {ok}, {msg}')
@@ -85,13 +83,11 @@ class RtspStream(Node):
         rtspt = self.get_parameter('rtsp_transport').value
 
         return (
-            f"ffmpeg -nostdin -hide_banner -loglevel info -nostats "
+            f"ffmpeg -nostdin -hide_banner -loglevel error -nostats "
             f"-f rawvideo -pix_fmt bgr24 -s {w}x{h} -r {fps} -i - "
             f"-vf format=yuv420p -an "
             f"-c:v {codec} -preset {preset} -tune {tune} -bf 0 "
             f"-b:v {br} -maxrate {br} -bufsize {br} -g {gop} "
-            f"-fflags +genpts+nobuffer -use_wallclock_as_timestamps 1 -vsync 0 "
-            f"-muxpreload 0 -muxdelay 0 -flush_packets 1 "
             f"-f rtsp -rtsp_transport {rtspt} {url}"
         )
 
@@ -211,8 +207,6 @@ class RtspStream(Node):
             stderr=subprocess.STDOUT,
             bufsize=0
         )
-        self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_loop, daemon=True)
-        self.rtsp_log_thread.start()
         self.rtsp_writer_thread = threading.Thread(target=self._writer_loop_rtsp, daemon=True)
         self.rtsp_writer_thread.start()
 
@@ -229,39 +223,9 @@ class RtspStream(Node):
             pass
         self.rtsp_proc = None
         self.rtsp_writer_thread = None
-        self.rtsp_log_thread = None
-        self.ffmpeg_ready.clear()
-    def _ffmpeg_log_loop(self):
-        try:
-            p = self.rtsp_proc
-            if not p or not p.stdout:
-                return
-            ready_seen = False
-            while self.running and (p.poll() is None):
-                line = p.stdout.readline()
-                if not line:
-                    break
-                text = line.decode(errors='ignore',).strip()
-
-                if ("Output #0, rtsp" in text) or ("frame=" in text) or ("SETUP" in text) or ("ANNOUNCE" in text) or ("RECORD" in text):
-                    ready_seen = True
-
-                if ready_seen and not self.ffmpeg_ready.is_set():
-                    self.ffmpeg_ready.set()
-                    self.get_logger().info("ffmpeg(rtsp) ready → start streaming")
-                if ("Connection refused" in text) or ("Could not write header" in text) or ("Immediate exit requested" in text):
-                    self.ffmpeg_ready.clear()
-        except Exception as e:
-            self.get_logger().warn(f"ffmpeg log loop err: {e}")
 
     def _writer_loop_rtsp(self):
         try:
-            next_log = 0.0
-            while self.running and self.rtsp_proc and self.rtsp_proc.poll() is None and not self.ffmpeg_ready.is_set():
-                if time.time() >= next_log:
-                    self.get_logger().info("waiting ffmpeg(rtsp) to be ready…")
-                    next_log = time.time() + 2.0
-                time.sleep(0.05)
             while self.running and self.rtsp_proc and self.rtsp_proc.poll() is None:
                 try:
                     frame = self.frame_q.get(timeout=0.1)
