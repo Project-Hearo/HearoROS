@@ -205,10 +205,9 @@ class RtspStream(Node):
         self.rtsp_proc = subprocess.Popen(
             shlex.split(cmd),
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,   
+            stdout=subprocess.DEVNULL,   
             stderr=subprocess.STDOUT,
             bufsize=0
-        
         )
         self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
         self.rtsp_log_thread.start()
