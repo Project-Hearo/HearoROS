@@ -6,6 +6,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from dotenv import load_dotenv
+import numpy as np
 load_dotenv()
 
 class RtspStream(Node):
@@ -54,6 +55,7 @@ class RtspStream(Node):
 
         self.lb_proc = None
         self.lb_writer_thread = None
+        self.rtsp_log_thread = None
 
         self.timer = self.create_timer(2.0, self._watchdog)  
         self.srv = self.create_service(SetBool, 'control', self._on_control)
@@ -83,7 +85,7 @@ class RtspStream(Node):
         rtspt = self.get_parameter('rtsp_transport').value
 
         return (
-            f"ffmpeg -nostdin -hide_banner -loglevel error -nostats "
+            f"ffmpeg -nostdin -hide_banner -loglevel info -nostats "
             f"-f rawvideo -pix_fmt bgr24 -s {w}x{h} -r {fps} -i - "
             f"-vf format=yuv420p -an "
             f"-c:v {codec} -preset {preset} -tune {tune} -bf 0 "
@@ -206,7 +208,11 @@ class RtspStream(Node):
             stdout=subprocess.PIPE,   
             stderr=subprocess.STDOUT,
             bufsize=0
+        
         )
+        self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
+        self.rtsp_log_thread.start()
+        
         self.rtsp_writer_thread = threading.Thread(target=self._writer_loop_rtsp, daemon=True)
         self.rtsp_writer_thread.start()
 
@@ -218,11 +224,16 @@ class RtspStream(Node):
             pass
         try:
             if self.rtsp_proc and self.rtsp_proc.poll() is None:
-                self.rtsp_proc.kill()
+                self.rtsp_proc.terminate()
+                try:
+                    self.rtsp_proc.wait(timeout=1.0)
+                except Exception:
+                    self.rtsp_proc.kill()
         except Exception:
             pass
         self.rtsp_proc = None
         self.rtsp_writer_thread = None
+        self.rtsp_log_thread = None
 
     def _writer_loop_rtsp(self):
         try:
