@@ -19,7 +19,7 @@ class RtspStream(Node):
             ('camera_fourcc', 'MJPG'),       
             ('publish_topic', '/stream_image_raw'),
 
-            ('codec', 'h264_v4l2m2m'),       
+            ('codec', 'libx264'),       
             ('bitrate', '1M'),
             ('gop', 120),
             ('preset', 'veryfast'),
