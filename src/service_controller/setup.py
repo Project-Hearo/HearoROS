@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'map_uploader = service_controller.map_uploader_server:main',
+            'camera_stream = service_controller.camera_stream:main', 
         ],
     },
 )
