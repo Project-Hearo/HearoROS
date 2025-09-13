@@ -1,7 +1,7 @@
 import rclpy, subprocess, shlex, signal, time, threading, cv2
 from rclpy.node import Node
 from std_srvs.srv import SetBool
-from rclpy.qos import SensorDataQoS
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from dotenv import load_dotenv
@@ -29,14 +29,19 @@ class RtspStream(Node):
             ('rtsp_url', os.getenv('RTSP_URL', 'rtsp://localhost:8554/robot')),
         ]) 
   
-
+        qos = QoSProfile(
+        depth=10,
+        reliability=ReliabilityPolicy.BEST_EFFORT,
+        history=HistoryPolicy.KEEP_LAST
+        )
+        
         self.proc = None
         self.cap = None
         self.writer_thread = None
         self.running = False
 
         self.bridge = CvBridge()
-        self.pub = self.create_publisher(Image, self.get_parameter('publish_topic').value, SensorDataQoS())
+        self.pub = self.create_publisher(Image, self.get_parameter('publish_topic').value, qos)
 
         self.lock = threading.Lock()
         self.timer = self.create_timer(2.0, self._watchdog)
