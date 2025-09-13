@@ -1,4 +1,4 @@
-import os, time, shlex, signal, threading, subprocess, cv2, rclpy
+import os, time, shlex, threading, subprocess, cv2, rclpy
 from queue import Queue, Empty
 from rclpy.node import Node
 from std_srvs.srv import SetBool
@@ -7,20 +7,26 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from dotenv import load_dotenv
 import numpy as np
+from collections import deque
+
 load_dotenv()
 
 class RtspStream(Node):
     def __init__(self):
         super().__init__('rtsp_stream')
         self.declare_parameters('', [
-            ('device', '0'),                 
+            # Camera
+            ('device', '0'),
             ('width', 320),
             ('height', 240),
             ('fps', 120),
-            ('camera_fourcc', 'MJPG'),       
+            ('camera_fourcc', 'MJPG'),
+
+            # ROS
             ('publish_topic', '/stream_image_raw'),
 
-            ('codec', 'libx264'),       
+            # FFmpeg encode
+            ('codec', 'libx264'),              # 'h264_v4l2m2m' 권장(성능)
             ('bitrate', '1M'),
             ('gop', 120),
             ('preset', 'veryfast'),
@@ -28,9 +34,17 @@ class RtspStream(Node):
             ('rtsp_transport', 'tcp'),
             ('rtsp_url', os.getenv('RTSP_URL', 'rtsp://localhost:8554/robot')),
 
+            # Pipe/Input tuning
+            ('pipe_format', 'mjpeg'),          # 'raw' or 'mjpeg'
+            ('jpeg_quality', 80),              # when pipe_format == 'mjpeg'
+            ('ffmpeg_debug_log', True),        # True면 로그 드레인 + tail 기록
+            ('dry_run_null', False),           # True면 RTSP 대신 -f null - 로 테스트
+
+            # Optional v4l2loopback
             ('enable_loopback', False),
             ('loopback_device', '/dev/video10'),
 
+            # Runtime
             ('reconnect_delay_s', 3),
             ('autostart', False),
         ])
@@ -48,22 +62,27 @@ class RtspStream(Node):
         self.cap = None
         self.capture_thread = None
 
-        self.frame_q = Queue(maxsize=1)  
+        # 최신 1장만 유지 (라이브 우선)
+        self.frame_q = Queue(maxsize=1)
 
         self.rtsp_proc = None
         self.rtsp_writer_thread = None
+        self.rtsp_log_thread = None
+
+        # FFmpeg 로그 링버퍼(마지막 N줄 저장)
+        self._ffbuf = deque(maxlen=200)
 
         self.lb_proc = None
         self.lb_writer_thread = None
-        self.rtsp_log_thread = None
 
-        self.timer = self.create_timer(2.0, self._watchdog)  
+        self.timer = self.create_timer(2.0, self._watchdog)
         self.srv = self.create_service(SetBool, 'control', self._on_control)
 
         if self.get_parameter('autostart').value:
             ok, msg = self.start_stream()
             self.get_logger().info(f'autostart: {ok}, {msg}')
 
+    # ─────────────────────────────── controls ─────────────────────────────── #
     def _on_control(self, req, resp):
         try:
             if req.data:
@@ -75,6 +94,7 @@ class RtspStream(Node):
             resp.success, resp.message = False, f'error: {e}'
         return resp
 
+    # ─────────────────────────────── ffmpeg cmd ───────────────────────────── #
     def _build_rtsp_cmd(self, w, h, fps):
         codec = self.get_parameter('codec').value
         br    = self.get_parameter('bitrate').value
@@ -83,25 +103,42 @@ class RtspStream(Node):
         tune  = self.get_parameter('tune').value
         url   = self.get_parameter('rtsp_url').value
         rtspt = self.get_parameter('rtsp_transport').value
+        pipef = self.get_parameter('pipe_format').value
+        dry   = bool(self.get_parameter('dry_run_null').value)
 
+        # 입력 포맷: raw 또는 mjpeg
+        if pipef.lower() == 'mjpeg':
+            in_fmt = f"-f mjpeg -r {fps} -i -"
+        else:
+            in_fmt = f"-f rawvideo -pix_fmt bgr24 -s {w}x{h} -r {fps} -i -"
+
+        # 출력: rtsp 또는 null (디버그용)
+        if dry:
+            out = "-f null -"
+        else:
+            out = f"-f rtsp -rtsp_transport {rtspt} {url}"
+
+        # 저지연/PTS 안정화 옵션 포함
         return (
             f"ffmpeg -nostdin -hide_banner -loglevel info -nostats "
-            f"-f rawvideo -pix_fmt bgr24 -s {w}x{h} -r {fps} -i - "
+            f"{in_fmt} "
             f"-vf format=yuv420p -an "
             f"-c:v {codec} -preset {preset} -tune {tune} -bf 0 "
             f"-b:v {br} -maxrate {br} -bufsize {br} -g {gop} "
             f"-fflags +genpts+nobuffer -use_wallclock_as_timestamps 1 -vsync 0 "
             f"-muxpreload 0 -muxdelay 0 -flush_packets 1 "
-            f"-f rtsp -rtsp_transport {rtspt} {url}"
+            f"{out}"
         )
 
     def _build_loopback_cmd(self, w, h, fps, dev):
+        # loopback는 장치가 받아들이는 픽셀 포맷 제약이 있으니 필요시 수정
         return (
-            f"ffmpeg -nostdin -hide_banner -loglevel error -nostats "
+            f"ffmpeg -nostdin -hide_banner -loglevel info -nostats "
             f"-f rawvideo -pix_fmt bgr24 -s {w}x{h} -r {fps} -i - "
             f"-f v4l2 {dev}"
         )
 
+    # ─────────────────────────────── lifecycle ────────────────────────────── #
     def start_stream(self):
         with self.lock:
             if self.running:
@@ -124,6 +161,7 @@ class RtspStream(Node):
             if not self.cap.isOpened():
                 return False, f'failed to open camera: {dev}'
 
+            # warm-up
             probe_ok = False
             for _ in range(10):
                 ok, _ = self.cap.read()
@@ -132,14 +170,13 @@ class RtspStream(Node):
                     break
                 time.sleep(0.01)
             if not probe_ok:
-                self.cap.release()
-                self.cap = None
+                self.cap.release(); self.cap = None
                 return False, 'camera opened but failed to read frames (check width/height/fps/fourcc)'
 
-            aw  = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            ah  = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            afps= self.cap.get(cv2.CAP_PROP_FPS)
-            fc  = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+            aw = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            ah = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            afps = self.cap.get(cv2.CAP_PROP_FPS)
+            fc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
             fcs = "".join([chr((fc >> 8*i) & 0xFF) for i in range(4)])
             self.get_logger().info(f"camera ready: {aw}x{ah}@{afps:.2f}, FOURCC={fcs}")
 
@@ -160,11 +197,9 @@ class RtspStream(Node):
         with self.lock:
             self.running = False
 
-            # stop writers first
             self._stop_rtsp_writer()
             self._stop_loopback_writer()
 
-            # stop capture
             try:
                 if self.capture_thread and self.capture_thread.is_alive():
                     self.capture_thread.join(timeout=1.0)
@@ -181,22 +216,22 @@ class RtspStream(Node):
 
             return True, 'stopped'
 
+    # ───────────────────────────── capture loop ───────────────────────────── #
     def _capture_loop(self):
         while self.running and self.cap:
             ok, frame = self.cap.read()
             if not ok:
                 time.sleep(0.003)
                 continue
-            if frame.dtype != np.uint8:
-                frame = frame.astype(np.uint8, copy=False)
-            if not frame.flags['C_CONTIGUOUS']:
-                frame = np.ascontiguousarray(frame)
+
+            # ROS publish (BGR8)
             try:
                 msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
                 self.pub.publish(msg)
             except Exception as e:
                 self.get_logger().warn(f'publish err: {e}')
 
+            # 최신 1장만 유지
             try:
                 if self.frame_q.full():
                     _ = self.frame_q.get_nowait()
@@ -204,11 +239,14 @@ class RtspStream(Node):
             except Exception:
                 pass
 
+    # ───────────────────────────── ffmpeg writer ──────────────────────────── #
     def _start_rtsp_writer(self, w, h, fps):
         cmd = self._build_rtsp_cmd(w, h, fps)
         self.get_logger().info(f"starting ffmpeg (rtsp): {cmd}")
-        
-        DEBUG_LOG = True
+
+        self._ffbuf.clear()
+        DEBUG_LOG = bool(self.get_parameter('ffmpeg_debug_log').value)
+
         self.rtsp_proc = subprocess.Popen(
             shlex.split(cmd),
             stdin=subprocess.PIPE,
@@ -216,14 +254,16 @@ class RtspStream(Node):
             stderr=subprocess.STDOUT,
             bufsize=0
         )
+
         if DEBUG_LOG:
             self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
             self.rtsp_log_thread.start()
         else:
             self.rtsp_log_thread = None
-        
-        self.rtsp_writer_thread = threading.Thread(target=self._writer_loop_rtsp, daemon=True)
+
+        self.rtsp_writer_thread = threading.Thread(target=self._writer_loop_rtsp, args=(w, h, fps), daemon=True)
         self.rtsp_writer_thread.start()
+
     def _ffmpeg_log_drain(self):
         p = self.rtsp_proc
         if not p or not p.stdout:
@@ -232,13 +272,20 @@ class RtspStream(Node):
             line = p.stdout.readline()
             if not line:
                 break
-            self.get_logger().info(f"[ffmpeg] {line.decode(errors='ignore').strip()}")
+            text = line.decode(errors='ignore').strip()
+            self._ffbuf.append(text)
+            self.get_logger().info(f"[ffmpeg] {text}")
+
     def _stop_rtsp_writer(self):
         try:
             if self.rtsp_proc and self.rtsp_proc.stdin:
-                self.rtsp_proc.stdin.close()
+                try:
+                    self.rtsp_proc.stdin.close()
+                except Exception:
+                    pass
         except Exception:
             pass
+
         try:
             if self.rtsp_proc and self.rtsp_proc.poll() is None:
                 self.rtsp_proc.terminate()
@@ -248,19 +295,50 @@ class RtspStream(Node):
                     self.rtsp_proc.kill()
         except Exception:
             pass
+
+        # 종료 코드 + tail 로그 출력
+        try:
+            rc = self.rtsp_proc.returncode if self.rtsp_proc else None
+            if rc is not None:
+                tail = "\n".join(list(self._ffbuf)[-15:])
+                self.get_logger().warn(f"ffmpeg exited rc={rc}. tail logs:\n{tail}")
+        except Exception:
+            pass
+
         self.rtsp_proc = None
         self.rtsp_writer_thread = None
         self.rtsp_log_thread = None
 
-    def _writer_loop_rtsp(self):
+    def _writer_loop_rtsp(self, w, h, fps):
+        pipef = self.get_parameter('pipe_format').value.lower()
+        frame_bytes = w * h * 3
+
         try:
             while self.running and self.rtsp_proc and self.rtsp_proc.poll() is None:
                 try:
                     frame = self.frame_q.get(timeout=0.1)
                 except Empty:
                     continue
+
+                # NOTE: ROS publish용 frame 그대로 사용.
+                # 파이프 포맷에 따라 가공이 다름
                 try:
-                    self.rtsp_proc.stdin.write(frame.tobytes())
+                    if pipef == 'mjpeg':
+                        q = int(self.get_parameter('jpeg_quality').value)
+                        ok, enc = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), q])
+                        if not ok:
+                            continue
+                        self.rtsp_proc.stdin.write(enc.tobytes())
+                    else:
+                        # rawvideo: BGR 연속 메모리 + 사이즈 가드
+                        if frame.dtype != np.uint8:
+                            frame = frame.astype(np.uint8, copy=False)
+                        if not frame.flags['C_CONTIGUOUS']:
+                            frame = np.ascontiguousarray(frame)
+                        if frame.nbytes != frame_bytes:
+                            self.get_logger().error(f"raw size mismatch: {frame.nbytes} != {frame_bytes}")
+                            continue
+                        self.rtsp_proc.stdin.write(frame.tobytes())
                 except Exception as e:
                     self.get_logger().warn(f'ffmpeg(rtsp) pipe err: {e}')
                     break
@@ -269,12 +347,14 @@ class RtspStream(Node):
                 delay = int(self.get_parameter('reconnect_delay_s').value)
                 self.get_logger().warn(f"ffmpeg(rtsp) down, restarting in {delay}s...")
                 time.sleep(delay)
-                w = int(self.get_parameter('width').value)
-                h = int(self.get_parameter('height').value)
-                fps = int(self.get_parameter('fps').value)
                 self._stop_rtsp_writer()
-                self._start_rtsp_writer(w, h, fps)
+                # 최신 파라미터로 다시 시작
+                w2 = int(self.get_parameter('width').value)
+                h2 = int(self.get_parameter('height').value)
+                fps2 = int(self.get_parameter('fps').value)
+                self._start_rtsp_writer(w2, h2, fps2)
 
+    # ───────────────────────────── loopback (optional) ────────────────────── #
     def _start_loopback_writer(self, w, h, fps):
         dev = self.get_parameter('loopback_device').value
         cmd = self._build_loopback_cmd(w, h, fps, dev)
@@ -304,6 +384,7 @@ class RtspStream(Node):
         self.lb_writer_thread = None
 
     def _writer_loop_loopback(self):
+        # loopback은 rawvideo 전제(필요시 mjpeg로 별도 구현)
         try:
             while self.running and self.lb_proc and self.lb_proc.poll() is None:
                 try:
@@ -311,6 +392,10 @@ class RtspStream(Node):
                 except Empty:
                     continue
                 try:
+                    if frame.dtype != np.uint8:
+                        frame = frame.astype(np.uint8, copy=False)
+                    if not frame.flags['C_CONTIGUOUS']:
+                        frame = np.ascontiguousarray(frame)
                     self.lb_proc.stdin.write(frame.tobytes())
                 except Exception as e:
                     self.get_logger().warn(f'ffmpeg(loopback) pipe err: {e}')
@@ -327,6 +412,7 @@ class RtspStream(Node):
                 self._stop_loopback_writer()
                 self._start_loopback_writer(w, h, fps)
 
+    # ───────────────────────────── misc ───────────────────────────────────── #
     def _watchdog(self):
         pass
 
