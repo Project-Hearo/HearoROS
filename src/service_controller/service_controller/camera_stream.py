@@ -19,14 +19,14 @@ class RtspStream(Node):
             ('device', '0'),
             ('width', 320),
             ('height', 240),
-            ('fps', 120),
+            ('fps', 60),
             ('camera_fourcc', 'MJPG'),
 
             # ROS
             ('publish_topic', '/stream_image_raw'),
 
             # FFmpeg encode
-            ('codec', 'h264_v4l2m2m'),              # Pi면 'h264_v4l2m2m' 추천
+            ('codec', 'h264_v4l2m2m'),        # 문제시 'libx264'로 바꿔 확인
             ('bitrate', '1M'),
             ('gop', 120),
             ('preset', 'veryfast'),
@@ -37,8 +37,9 @@ class RtspStream(Node):
             # Pipe/Input tuning
             ('pipe_format', 'mjpeg'),          # 'mjpeg' or 'raw'
             ('jpeg_quality', 80),              # when pipe_format == 'mjpeg'
+            ('pix_fmt', 'yuv420p'),            # 인코더 입력 픽셀 포맷
             ('ffmpeg_debug_log', True),        # 로그 드레인 + tail 저장
-            ('dry_run_null', False),           # True면 RTSP 대신 -f null -
+            ('dry_run_null', False),           # True면 RTSP 대신 -f null - (네트워크 배제 진단)
 
             # Optional v4l2loopback
             ('enable_loopback', False),
@@ -85,7 +86,7 @@ class RtspStream(Node):
             ok, msg = self.start_stream()
             self.get_logger().info(f'autostart: {ok}, {msg}')
 
-    # ───────────────────────── controls ───────────────────────── #
+    # ───────── controls ───────── #
     def _on_control(self, req, resp):
         try:
             if req.data:
@@ -97,7 +98,7 @@ class RtspStream(Node):
             resp.success, resp.message = False, f'error: {e}'
         return resp
 
-    # ───────────────────────── ffmpeg cmd ─────────────────────── #
+    # ───────── ffmpeg cmd ───────── #
     def _build_rtsp_cmd(self, w, h, fps):
         codec = self.get_parameter('codec').value
         br    = self.get_parameter('bitrate').value
@@ -108,6 +109,7 @@ class RtspStream(Node):
         rtspt = self.get_parameter('rtsp_transport').value
         pipef = self.get_parameter('pipe_format').value
         dry   = bool(self.get_parameter('dry_run_null').value)
+        pixfmt= self.get_parameter('pix_fmt').value
 
         # 입력 포맷: raw 또는 mjpeg
         if pipef.lower() == 'mjpeg':
@@ -116,18 +118,19 @@ class RtspStream(Node):
             in_fmt = f"-f rawvideo -pix_fmt bgr24 -s {w}x{h} -r {fps} -i -"
 
         # 출력: rtsp 또는 null (디버그용)
-        if dry:
-            out = "-f null -"
-        else:
-            out = f"-f rtsp -rtsp_transport {rtspt} {url}"
+        out = "-f null -" if dry else f"-f rtsp -rtsp_transport {rtspt} {url}"
+
+        # v4l2m2m 안정성 위해 SAR 고정
+        vf = f"-vf \"format={pixfmt},setsar=1\""
 
         return (
             f"ffmpeg -nostdin -hide_banner -loglevel info -nostats "
             f"{in_fmt} "
-            f"-vf format=yuv420p -an "
+            f"{vf} -an "
             f"-c:v {codec} -preset {preset} -tune {tune} -bf 0 "
             f"-b:v {br} -maxrate {br} -bufsize {br} -g {gop} "
-            f"-fflags +genpts+nobuffer -use_wallclock_as_timestamps 1 -vsync 0 "
+            f"-fflags +genpts+nobuffer -use_wallclock_as_timestamps 1 -fps_mode passthrough "
+            f"-analyzeduration 0 -probesize 32 "
             f"-muxpreload 0 -muxdelay 0 -flush_packets 1 "
             f"{out}"
         )
@@ -139,7 +142,7 @@ class RtspStream(Node):
             f"-f v4l2 {dev}"
         )
 
-    # ───────────────────────── lifecycle ──────────────────────── #
+    # ───────── lifecycle ───────── #
     def start_stream(self):
         with self.lock:
             if self.running:
@@ -217,7 +220,7 @@ class RtspStream(Node):
 
             return True, 'stopped'
 
-    # ───────────────────────── capture loop ───────────────────── #
+    # ───────── capture loop ───────── #
     def _capture_loop(self):
         while self.running and self.cap:
             ok, frame = self.cap.read()
@@ -240,7 +243,7 @@ class RtspStream(Node):
             except Exception:
                 pass
 
-    # ───────────────────────── ffmpeg writer ─────────────────── #
+    # ───────── ffmpeg writer ───────── #
     def _start_rtsp_writer(self, w, h, fps):
         cmd = self._build_rtsp_cmd(w, h, fps)
         self.get_logger().info(f"starting ffmpeg (rtsp): {cmd}")
@@ -248,9 +251,9 @@ class RtspStream(Node):
         self._ffbuf.clear()
         DEBUG_LOG = bool(self.get_parameter('ffmpeg_debug_log').value)
 
-        # 선택: FFREPORT로 파일 로그까지 남기고 싶으면 env에 추가
         env = os.environ.copy()
-        # env["FFREPORT"] = "file=/tmp/ffreport.log:level=32"  # 필요 시 주석 해제
+        # 파일 로그가 필요하면 아래 주석 해제
+        # env["FFREPORT"] = "file=/tmp/ffreport.log:level=32"
 
         self.rtsp_proc = subprocess.Popen(
             shlex.split(cmd),
@@ -261,7 +264,6 @@ class RtspStream(Node):
             env=env
         )
 
-        # 로그 드레인
         if DEBUG_LOG:
             self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
             self.rtsp_log_thread.start()
@@ -330,7 +332,7 @@ class RtspStream(Node):
         frame_bytes = w * h * 3
 
         try:
-            # 아주 짧게 대기해서 ffmpeg 쪽 초기화 여유 (deadlock 아님)
+            # ffmpeg 입력 준비 시간 약간 부여
             time.sleep(0.03)
 
             while self.running and self.rtsp_proc and self.rtsp_proc.poll() is None:
@@ -371,7 +373,7 @@ class RtspStream(Node):
                 fps2 = int(self.get_parameter('fps').value)
                 self._start_rtsp_writer(w2, h2, fps2)
 
-    # ───────────────────────── loopback (optional) ────────────── #
+    # ───────── loopback (optional) ───────── #
     def _start_loopback_writer(self, w, h, fps):
         dev = self.get_parameter('loopback_device').value
         cmd = self._build_loopback_cmd(w, h, fps, dev)
@@ -428,7 +430,7 @@ class RtspStream(Node):
                 self._stop_loopback_writer()
                 self._start_loopback_writer(w, h, fps)
 
-    # ───────────────────────── misc ───────────────────────────── #
+    # ───────── misc ───────── #
     def _watchdog(self):
         pass
 
