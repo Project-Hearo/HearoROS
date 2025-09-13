@@ -90,6 +90,8 @@ class RtspStream(Node):
             f"-vf format=yuv420p -an "
             f"-c:v {codec} -preset {preset} -tune {tune} -bf 0 "
             f"-b:v {br} -maxrate {br} -bufsize {br} -g {gop} "
+            f"-fflags +genpts+nobuffer -use_wallclock_as_timestamps 1 -vsync 0 "
+            f"-muxpreload 0 -muxdelay 0 -flush_packets 1 "
             f"-f rtsp -rtsp_transport {rtspt} {url}"
         )
 
@@ -185,7 +187,10 @@ class RtspStream(Node):
             if not ok:
                 time.sleep(0.003)
                 continue
-
+            if frame.dtype != np.uint8:
+                frame = frame.astype(np.uint8, copy=False)
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame)
             try:
                 msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
                 self.pub.publish(msg)
@@ -202,19 +207,32 @@ class RtspStream(Node):
     def _start_rtsp_writer(self, w, h, fps):
         cmd = self._build_rtsp_cmd(w, h, fps)
         self.get_logger().info(f"starting ffmpeg (rtsp): {cmd}")
+        
+        DEBUG_LOG = True
         self.rtsp_proc = subprocess.Popen(
             shlex.split(cmd),
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,   
+            stdout=(subprocess.PIPE if DEBUG_LOG else subprocess.DEVNULL),
             stderr=subprocess.STDOUT,
             bufsize=0
         )
-        self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
-        self.rtsp_log_thread.start()
+        if DEBUG_LOG:
+            self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
+            self.rtsp_log_thread.start()
+        else:
+            self.rtsp_log_thread = None
         
         self.rtsp_writer_thread = threading.Thread(target=self._writer_loop_rtsp, daemon=True)
         self.rtsp_writer_thread.start()
-
+    def _ffmpeg_log_drain(self):
+        p = self.rtsp_proc
+        if not p or not p.stdout:
+            return
+        while self.running and p.poll() is None:
+            line = p.stdout.readline()
+            if not line:
+                break
+            self.get_logger().info(f"[ffmpeg] {line.decode(errors='ignore').strip()}")
     def _stop_rtsp_writer(self):
         try:
             if self.rtsp_proc and self.rtsp_proc.stdin:
