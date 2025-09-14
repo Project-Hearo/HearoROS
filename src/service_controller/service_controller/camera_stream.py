@@ -36,7 +36,7 @@ class RtspStream(Node):
             ('rtsp_url', os.getenv('RTSP_URL', 'rtsp://localhost:8554/robot')),
 
             # Pipe/Input tuning
-            ('pipe_format', 'mjpeg'),
+            ('pipe_format', 'raw'),
             ('jpeg_quality', 80),
             ('pix_fmt', 'yuv420p'),
             ('ffmpeg_debug_log', True),
