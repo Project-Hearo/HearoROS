@@ -26,7 +26,7 @@ class RtspStream(Node):
             ('publish_topic', '/stream_image_raw'),
 
             # FFmpeg encode
-            ('codec', 'h264_v4l2m2m'),        # 문제시 'libx264'로 바꿔 확인
+            ('codec', 'libx264'),        # 문제시 'libx264'로 바꿔 확인
             ('bitrate', '0.1M'),
             ('gop', 120),
             ('preset', 'veryfast'),
