@@ -32,8 +32,11 @@ RUN set -eux; \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-      python3-opencv python3-numpy; \
-    pip install --no-cache-dir tflite-runtime; \
+        libopencv-dev python3-dev; \
+    pip install --no-cache-dir \
+        numpy \
+        opencv-python \
+        tensorflow; \
     rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends \
