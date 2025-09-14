@@ -52,7 +52,6 @@ docker run -it --rm \
   -v ~/Desktop/HearoROS:/root/HearoROS \
   --env-file ~/Desktop/HearoROS/.env \
   \
-  # -- [카메라 연결을 위한 추가/수정된 부분] -- #
   -v /dev/video0:/dev/video0 \
   --device=/dev/vchiq \
   --device=/dev/vcsm \
