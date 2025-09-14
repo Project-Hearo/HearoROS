@@ -20,11 +20,9 @@ class PersonDetectorNode(Node):
     def __init__(self):
         super().__init__('person_detector_node')
         
-        # [통합] 패키지 경로 설정
         package_share_path = get_package_share_directory('robot_info')
         default_model_path = os.path.join(package_share_path, 'models', 'Yolo-X_w8a8.tflite')
 
-        # [유지] ROS 2 파라미터 선언
         self.declare_parameter('model_path', default_model_path)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('nms_threshold', 0.45)
@@ -32,10 +30,8 @@ class PersonDetectorNode(Node):
         self.declare_parameter('detection_topic', '/person_detector/detection')
         self.declare_parameter('result_image_topic', '/person_detector/image_result')
         
-        # [개선] 파라미터 변경 시 호출될 콜백 등록
         self.add_on_set_parameters_callback(self.parameters_callback)
 
-        # 파라미터 값 가져오기
         model_path = self.get_parameter('model_path').get_parameter_value().string_value
         self.confidence_threshold = self.get_parameter('confidence_threshold').get_parameter_value().double_value
         self.nms_threshold = self.get_parameter('nms_threshold').get_parameter_value().double_value
@@ -45,19 +41,16 @@ class PersonDetectorNode(Node):
         
         self.bridge = CvBridge()
 
-        # QoS 프로파일 생성
         sensor_qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
 
-        # 구독자 및 발행자 생성
         self.image_sub = self.create_subscription(Image, input_topic, self.image_callback, sensor_qos_profile)
         self.detection_pub = self.create_publisher(PolygonStamped, detection_topic, 10)
         self.result_image_pub = self.create_publisher(Image, result_image_topic, 10)
         
-        # TFLite 모델 로드
         if not os.path.exists(model_path):
             self.get_logger().error(f"모델 파일을 찾을 수 없습니다: {model_path}")
             rclpy.shutdown()
@@ -70,16 +63,12 @@ class PersonDetectorNode(Node):
         self.input_height = self.input_details[0]['shape'][1]
         self.input_width = self.input_details[0]['shape'][2]
         
-        # [통합] 사람 탐지용 색상 (녹색)
         self.color = (0, 255, 0)
-
-        # [통합] FPS 계산을 위한 변수
         self.prev_time = 0
 
         self.get_logger().info(f"'{self.get_name()}' 노드가 시작되었습니다. 모델: {model_path}")
         self.get_logger().info(f"모델 출력 상세 정보: {self.output_details}")
 
-    # [개선] 파라미터 동적 변경을 위한 콜백 함수
     def parameters_callback(self, params):
         for param in params:
             if param.name == 'confidence_threshold':
@@ -120,11 +109,12 @@ class PersonDetectorNode(Node):
         
         self.draw_detections(frame, boxes, scores, class_ids)
         
-        # [통합] FPS 계산 및 표시
         curr_time = time.time()
-        fps = 1 / (curr_time - self.prev_time)
+        # prev_time이 0이면 첫 프레임이므로 FPS 계산 생략
+        if self.prev_time > 0:
+            fps = 1 / (curr_time - self.prev_time)
+            cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, self.color, 2)
         self.prev_time = curr_time
-        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, self.color, 2)
         
         try:
             result_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
@@ -139,77 +129,82 @@ class PersonDetectorNode(Node):
         input_data = np.expand_dims(rgb_image, axis=0).astype(np.uint8)
         return input_data, resized_image
 
-    # [통합] 독립 실행 파일의 상세한 후처리 로직으로 교체
+    # --- [수정] 후처리 함수 전체를 안정적인 새 로직으로 교체 ---
     def postprocess_output(self, outputs, original_shape, resized_shape):
         try:
-            # 양자화된 모델 출력 파싱 (출력 텐서가 3개 이상일 경우)
-            if len(outputs) >= 3:
-                boxes_quantized = outputs[0][0]
-                scores_quantized = outputs[1][0]
-                classes_quantized = outputs[2][0]
-                
-                # 양자화 파라미터로 디코딩
-                boxes_scale = self.output_details[0]['quantization_parameters']['scales'][0]
-                boxes_zero_point = self.output_details[0]['quantization_parameters']['zero_points'][0]
-                scores_scale = self.output_details[1]['quantization_parameters']['scales'][0]
-                scores_zero_point = self.output_details[1]['quantization_parameters']['zero_points'][0]
-                
-                boxes = (boxes_quantized.astype(np.float32) - boxes_zero_point) * boxes_scale
-                scores = (scores_quantized.astype(np.float32) - scores_zero_point) * scores_scale
-                classes = classes_quantized.astype(np.int32)
-                
-                # 사람 클래스(id=0)만 필터링
-                person_indices = np.where(classes == 0)[0]
-                if len(person_indices) == 0: return [], [], []
-                
-                person_boxes = boxes[person_indices]
-                person_scores = scores[person_indices]
-                person_classes = classes[person_indices]
-                
-                # 신뢰도 임계값 필터링
-                score_mask = person_scores >= self.confidence_threshold
-                person_boxes = person_boxes[score_mask]
-                person_scores = person_scores[score_mask]
-                person_classes = person_classes[score_mask]
-                
-                if len(person_boxes) == 0: return [], [], []
-                
-                # NMS 적용
-                selected_indices = tf.image.non_max_suppression(
-                    person_boxes, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
-                )
-                
-                # 최종 결과 정리
-                final_boxes, final_scores, final_class_ids = [], [], []
-                h_orig, w_orig = original_shape
-                
-                for index in selected_indices:
-                    x1_norm, y1_norm, x2_norm, y2_norm = person_boxes[index]
-                    
-                    x1 = int(x1_norm * w_orig)
-                    y1 = int(y1_norm * h_orig)
-                    x2 = int(x2_norm * w_orig)
-                    y2 = int(y2_norm * h_orig)
+            # 모델 출력이 여러 개일 수 있으나, 보통 첫 번째 텐서에 모든 정보가 담겨있음
+            # (1, N, 85) -> 1=배치, N=탐지후보수, 85=cx,cy,w,h,conf,80개클래스점수
+            detections = np.squeeze(outputs[0])
 
-                    # 바운딩 박스 좌표가 이미지 경계를 벗어나지 않도록 조정
-                    x1_orig, y1_orig = max(0, x1), max(0, y1)
-                    x2_orig, y2_orig = min(w_orig, x2), min(h_orig, y2)
-                    
-                    if x2_orig > x1_orig and y2_orig > y1_orig:
-                        final_boxes.append([x1_orig, y1_orig, x2_orig, y2_orig])
-                        final_scores.append(person_scores[index])
-                        final_class_ids.append(person_classes[index])
-                        
-                return final_boxes, final_scores, final_class_ids
+            # 신뢰도(Confidence)가 일정 값 이상인 후보만 필터링
+            conf_mask = detections[:, 4] > self.confidence_threshold
+            detections = detections[conf_mask]
+            if len(detections) == 0:
+                return [], [], []
+
+            # 클래스 점수 계산 및 필터링
+            class_scores = detections[:, 5:]
+            class_ids = np.argmax(class_scores, axis=1)
+            scores = detections[:, 4] * class_scores[np.arange(len(detections)), class_ids]
+            score_mask = scores > self.confidence_threshold
+            
+            detections = detections[score_mask]
+            scores = scores[score_mask]
+            class_ids = class_ids[score_mask]
+            if len(detections) == 0:
+                return [], [], []
+
+            # '사람' 클래스(ID: 0)만 필터링
+            person_mask = class_ids == 0
+            boxes_data = detections[person_mask][:, :4]
+            person_scores = scores[person_mask]
+            person_class_ids = class_ids[person_mask]
+            if len(boxes_data) == 0:
+                return [], [], []
+
+            # 바운딩 박스 좌표 변환 (cx,cy,w,h -> y1,x1,y2,x2 for NMS)
+            cx, cy, w, h = boxes_data[:, 0], boxes_data[:, 1], boxes_data[:, 2], boxes_data[:, 3]
+            y1 = cy - h / 2
+            x1 = cx - w / 2
+            y2 = cy + h / 2
+            x2 = cx + w / 2
+            boxes_for_nms = np.stack([y1, x1, y2, x2], axis=1)
+            
+            # NMS(Non-Max Suppression) 실행
+            selected_indices = tf.image.non_max_suppression(
+                boxes_for_nms, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
+            )
+            
+            # 최종 결과 정리 및 원본 이미지 크기로 스케일링
+            final_boxes, final_scores, final_class_ids = [], [], []
+            h_orig, w_orig = original_shape
+            h_res, w_res = resized_shape
+            
+            for index in selected_indices:
+                x1_res, y1_res, x2_res, y2_res = boxes_data[index][:4]
+                # 중심점과 너비/높이를 원본 이미지 기준으로 변환
+                cx_orig = x1_res * (w_orig / w_res)
+                cy_orig = y1_res * (h_orig / h_res)
+                w_orig_s = x2_res * (w_orig / w_res)
+                h_orig_s = y2_res * (h_orig / h_res)
+                
+                x1_final = int(cx_orig - w_orig_s / 2)
+                y1_final = int(cy_orig - h_orig_s / 2)
+                x2_final = int(cx_orig + w_orig_s / 2)
+                y2_final = int(cy_orig + h_orig_s / 2)
+
+                final_boxes.append([x1_final, y1_final, x2_final, y2_final])
+                final_scores.append(person_scores[index])
+                final_class_ids.append(person_class_ids[index])
+            
+            return final_boxes, final_scores, final_class_ids
 
         except Exception as e:
             self.get_logger().error(f"후처리 중 오류 발생: {e}", throttle_duration_sec=2)
-            import traceback
-            traceback.print_exc()
-
+            # import traceback
+            # traceback.print_exc()
         return [], [], []
 
-    # [통합] 사람만 그리도록 간소화된 그리기 함수
     def draw_detections(self, frame, boxes, scores, class_ids):
         for i in range(len(boxes)):
             x1, y1, x2, y2 = boxes[i]
