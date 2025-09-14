@@ -36,26 +36,20 @@ exec bash -l
 
 docker run -it --rm \
   --name ros_container \
-  --privileged \
+  --shm-size=1g \
   --net=host \
   --ipc=host \
-  --shm-size=1g \
   -e DISPLAY=$DISPLAY \
-  -e ROS_DOMAIN_ID=20 \
   -e QT_X11_NO_MITSHM=1 \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
+  --privileged \
   --security-opt apparmor:unconfined \
-  -v /dev/input:/dev/input \
-  -v /dev/video0:/dev/video0 \
-  -v /var/run/dbus:/var/run/dbus \
-  -v /dev/dri:/dev/dri \
-  -v ~/Desktop/HearoROS:/root/HearoROS \
-  --env-file ~/Desktop/HearoROS/.env \
-  \
-  -v /dev/video0:/dev/video0 \
-  --device=/dev/vchiq \
-  --device=/dev/vcsm \
+  -v /dev:/dev \
   --group-add video \
-  \
+  --group-add render \
+  -v ~/Desktop/HearoROS:/root/HearoROS \
+  -v /var/run/dbus:/var/run/dbus \
+  --env-file ~/Desktop/HearoROS/.env \
+  -e ROS_DOMAIN_ID=20 \
   hearo/ros-humble-slam:latest \
   /bin/bash -lc "$CLEAN_BUILD_AND_SHELL"
