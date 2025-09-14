@@ -14,7 +14,7 @@ class PersonTrackerNode(Node):
         super().__init__('person_tracker_node')
 
         # --- 파라미터 선언 ---
-        self.declare_parameter('target_distance', 1.5)      # 목표 추적 거리 (미터)
+        self.declare_parameter('target_distance', 0.4)      # 목표 추적 거리 (미터)
         self.declare_parameter('p_gain_angular', 0.005)     # 회전 제어를 위한 P 게인 값
         self.declare_parameter('p_gain_linear', 0.4)       # 거리 제어를 위한 P 게인 값
         self.declare_parameter('camera_width', 320.0)       # 카메라 영상의 너비 (픽셀)
