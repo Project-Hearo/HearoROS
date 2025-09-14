@@ -25,19 +25,19 @@ class RobotMapLocation(Node):
             history=HistoryPolicy.KEEP_LAST
         )
         self.pub = self.create_publisher(PointStamped, pub_topic, qos_loc_pub)
-        self.sub = self.create_subscription(PoseWithCovarianceStamped, pose_topic, self._odom_cb, qos_profile_sensor_data)
+        self.sub = self.create_subscription(PoseWithCovarianceStamped, pose_topic, self._pose_cb, qos_profile_sensor_data)
         
         self.period = 1.0 / rate_hz if rate_hz > 0 else 0.0
-        self._latest_odom = None
+        self._latest_pose = None
         
         if self.period > 0:
             self.timer = self.create_timer(self.period, self._tick)
         
     def _pose_cb(self, msg: PoseWithCovarianceStamped):
-        self._latest_odom = msg
+        self._latest_pose = msg
         
     def _tick(self):
-        if self._latest_odom is None:
+        if self._latest_pose is None:
             return
         pose_msg = self._latest_pose
         p = pose_msg.pose.pose.position
