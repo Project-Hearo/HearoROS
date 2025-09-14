@@ -51,5 +51,12 @@ docker run -it --rm \
   -v /dev/dri:/dev/dri \
   -v ~/Desktop/HearoROS:/root/HearoROS \
   --env-file ~/Desktop/HearoROS/.env \
+  \
+  # -- [카메라 연결을 위한 추가/수정된 부분] -- #
+  -v /dev/video0:/dev/video0 \
+  --device=/dev/vchiq \
+  --device=/dev/vcsm \
+  --group-add video \
+  \
   hearo/ros-humble-slam:latest \
   /bin/bash -lc "$CLEAN_BUILD_AND_SHELL"
