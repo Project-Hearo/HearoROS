@@ -142,7 +142,7 @@ class PersonDetectorNode(Node):
     def preprocess_image(self, image):
         resized_image = cv2.resize(image, (self.input_width, self.input_height))
         rgb_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
-        input_data = np.expand_dims(rgb_image, axis=0).astype(np.float32)
+        input_data = np.expand_dims(rgb_image, axis=0).astype(np.uint8)
         return input_data, resized_image
 
     def postprocess_output(self, output_data, original_shape, resized_shape):
