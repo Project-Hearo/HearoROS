@@ -34,7 +34,7 @@ class PersonDetectorNode(Node):
         self.declare_parameter('model_path', default_model_path)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('nms_threshold', 0.45)
-        self.declare_parameter('input_topic', '/image_raw')
+        self.declare_parameter('input_topic', '/stream_image_raw')
         self.declare_parameter('detection_topic', '/person_detector/detection')
         self.declare_parameter('result_image_topic', '/person_detector/image_result')
 

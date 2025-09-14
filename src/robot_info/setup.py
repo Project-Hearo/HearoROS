@@ -1,5 +1,6 @@
 from setuptools import find_packages, setup
-
+import os
+from glob import glob
 package_name = 'robot_info'
 
 setup(
@@ -10,6 +11,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'models'), glob('models/*')),
+
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -23,6 +26,7 @@ setup(
             'robot_location = robot_info.robot_location:main',
             'camera_info = robot_info.camera_info:main' ,
             'robot_map_location = robot_info.robot_map_location:main',
+            'person_detector_node = robot_info.person_detector_node:main',
         ],
     },
 )
