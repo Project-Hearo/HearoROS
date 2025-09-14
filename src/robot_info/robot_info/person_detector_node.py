@@ -93,35 +93,10 @@ class PersonDetectorNode(Node):
                 self.get_logger().info(f"min_box_area = {self.min_box_area:.1f}")
         return SetParametersResult(successful=True)
 
-    # ================ Letterbox helpers ================
-    def _letterbox(self, img, new_shape, color=(114, 114, 114), scaleup=True):
-        """비율 유지 리사이즈 + 패딩. 반환: letterboxed_img, r, (pad_left, pad_top), (h0, w0)"""
-        h0, w0 = img.shape[:2]
-        if isinstance(new_shape, int):
-            new_shape = (new_shape, new_shape)
-        new_h, new_w = new_shape
-
-        r = min(new_w / w0, new_h / h0)
-        if not scaleup:
-            r = min(r, 1.0)
-
-        new_unpad = (int(round(w0 * r)), int(round(h0 * r)))
-        dw = new_w - new_unpad[0]
-        dh = new_h - new_unpad[1]
-        dw *= 0.5
-        dh *= 0.5
-
-        if (w0, h0) != new_unpad:
-            img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
-
-        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
-        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-        img = cv2.copyMakeBorder(img, top, bottom, left, right,
-                                 cv2.BORDER_CONSTANT, value=color)
-        return img, r, (left, top), (h0, w0)
-
+    # ================ Helper functions ================
     @staticmethod
     def _clip_box(x1, y1, x2, y2, w, h):
+        """바운딩 박스 좌표를 이미지 경계 내로 클리핑"""
         x1 = max(0, min(int(x1), w - 1))
         y1 = max(0, min(int(y1), h - 1))
         x2 = max(0, min(int(x2), w - 1))
@@ -186,90 +161,117 @@ class PersonDetectorNode(Node):
 
     # ================ Inference utils ================
     def _preprocess(self, bgr):
-        # 320x240 → (in_w,in_h)로 letterbox (비율 유지 + 패딩 기록)
-        letter, r, (dl, dt), (h0, w0) = self._letterbox(
-            bgr, (self.in_h, self.in_w), color=(114, 114, 114), scaleup=True
-        )
-        rgb = cv2.cvtColor(letter, cv2.COLOR_BGR2RGB)
-
-        if self.in_dtype == np.uint8:
-            inp = np.expand_dims(rgb.astype(np.uint8), axis=0)
-        else:
-            inp = np.expand_dims(rgb.astype(np.float32) / 255.0, axis=0)
-
+        """detection.py와 동일한 전처리 방식 사용"""
+        # 단순 리사이즈 (letterbox 대신)
+        resized_image = cv2.resize(bgr, (self.in_w, self.in_h))
+        # BGR -> RGB 변환, 차원 확장(batch), uint8 유지
+        rgb_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
+        input_data = np.expand_dims(rgb_image, axis=0).astype(np.uint8)
+        
+        # 메타데이터 (원본 크기 정보)
+        h0, w0 = bgr.shape[:2]
         meta = {
-            'r': r, 'dl': dl, 'dt': dt,
             'h0': h0, 'w0': w0,
             'ih': self.in_h, 'iw': self.in_w
         }
-        return inp, meta
+        return input_data, meta
 
     def _postprocess(self, outputs, meta):
+        
         try:
             if len(outputs) < 3:
                 return [], [], []
 
-            boxes = np.squeeze(outputs[0])   # (N,4) [x1,y1,x2,y2] on model input
-            scores = np.squeeze(outputs[1])  # (N,)
-            classes = np.squeeze(outputs[2]) # (N,)
-
-            if boxes.ndim == 1:
-                boxes = boxes.reshape(-1, 4)
-            if scores.ndim == 0:
-                scores = scores.reshape(-1)
-            if classes.ndim == 0:
-                classes = classes.reshape(-1)
-
-            # 좌표 정규화(0~1) 모델 대응: 최댓값이 1 근처면 입력 크기로 스케일
-            if boxes.size and float(np.max(boxes)) <= 1.5:
-                boxes[:, [0, 2]] *= meta['iw']
-                boxes[:, [1, 3]] *= meta['ih']
-
-            # confidence 필터
-            m = scores >= self.conf_th
-            boxes, scores, classes = boxes[m], scores[m], classes[m]
-            if boxes.size == 0:
+            # 양자화된 YOLO-X 출력 파싱 (detection.py와 동일)
+            boxes_quantized = outputs[0][0]  # [8400, 4] UINT8
+            scores_quantized = outputs[1][0]  # [8400] UINT8  
+            classes_quantized = outputs[2][0]  # [8400] UINT8
+            
+            # 양자화 파라미터로 디코딩 (모델에서 직접 가져오기)
+            boxes_quantization = self.out_details[0]['quantization_parameters']
+            scores_quantization = self.out_details[1]['quantization_parameters']
+            
+            boxes_scale = boxes_quantization['scales'][0]
+            boxes_zero_point = boxes_quantization['zero_points'][0]
+            scores_scale = scores_quantization['scales'][0]
+            scores_zero_point = scores_quantization['zero_points'][0]
+            
+            # 디코딩
+            boxes = (boxes_quantized.astype(np.float32) - boxes_zero_point) * boxes_scale
+            scores = (scores_quantized.astype(np.float32) - scores_zero_point) * scores_scale
+            classes = classes_quantized.astype(np.int32)
+            
+            # 사람 클래스만 필터링 (COCO dataset에서 person = 0)
+            person_indices = np.where(classes == 0)[0]
+            
+            if len(person_indices) == 0:
                 return [], [], []
-
-            # 사람(0)만
-            m2 = classes.astype(np.int32) == 0
-            boxes, scores, classes = boxes[m2], scores[m2], classes[m2]
-            if boxes.size == 0:
+            
+            # 사람 클래스 탐지 결과만 추출
+            person_boxes = boxes[person_indices]
+            person_scores = scores[person_indices]
+            person_classes = classes[person_indices]
+            
+            # 신뢰도 임계값 필터링
+            score_mask = person_scores >= self.conf_th
+            person_boxes = person_boxes[score_mask]
+            person_scores = person_scores[score_mask]
+            person_classes = person_classes[score_mask]
+            
+            if len(person_boxes) == 0:
                 return [], [], []
+            
+            # NMS 적용하여 중복 제거 (detection.py와 동일)
+            boxes_for_nms = person_boxes.copy()
+            # YOLO 출력은 [x1, y1, x2, y2] 형식이므로 그대로 사용
+            selected_indices = tf.image.non_max_suppression(
+                boxes_for_nms, person_scores, max_output_size=1, iou_threshold=self.nms_th
+            )
+            
+            # NMS 결과를 원본 이미지 크기로 변환
+            h_orig, w_orig = meta['h0'], meta['w0']
+            h_res, w_res = meta['ih'], meta['iw']
+            
+            final_boxes, final_scores, final_class_ids = [], [], []
+            
+            for index in selected_indices:
+                x1, y1, x2, y2 = person_boxes[index]
+                
+                # 좌표가 이미 정규화되어 있는지 확인하고 적절히 변환 (detection.py와 동일)
+                if x1 > 1.0 or y1 > 1.0 or x2 > 1.0 or y2 > 1.0:
+                    # 이미 픽셀 좌표인 경우 (모델 입력 크기 기준)
+                    # 원본 이미지 크기로 스케일링
+                    scale_x = w_orig / meta['iw']
+                    scale_y = h_orig / meta['ih']
+                    X1 = max(0, int(x1 * scale_x))
+                    Y1 = max(0, int(y1 * scale_y))
+                    X2 = min(w_orig, int(x2 * scale_x))
+                    Y2 = min(h_orig, int(y2 * scale_y))
+                else:
+                    # 정규화된 좌표인 경우
+                    X1 = max(0, int(x1 * w_orig))
+                    Y1 = max(0, int(y1 * h_orig))
+                    X2 = min(w_orig, int(x2 * w_orig))
+                    Y2 = min(h_orig, int(y2 * h_orig))
+                
+                # 유효한 바운딩 박스인지 확인
+                if X2 > X1 and Y2 > Y1 and X2 <= w_orig and Y2 <= h_orig:
+                    # 너무 작은 박스 제거
+                    if (X2 - X1) * (Y2 - Y1) < self.min_box_area:
+                        continue
+                    
+                    final_boxes.append([X1, Y1, X2, Y2])
+                    final_scores.append(float(person_scores[index]))
+                    final_class_ids.append(0)
+                    
+                    self.get_logger().info(f"탐지된 사람: confidence={person_scores[index]:.3f}, bbox=[{X1}, {Y1}, {X2}, {Y2}]")
 
-            # NMS (letterboxed 좌표계)
-            yxyx = np.stack([boxes[:, 1], boxes[:, 0], boxes[:, 3], boxes[:, 2]], axis=1)
-            keep = tf.image.non_max_suppression(yxyx, scores,
-                                                max_output_size=20,
-                                                iou_threshold=self.nms_th)
-            keep = keep.numpy().tolist()
-            if not keep:
-                return [], [], []
-
-            # 언패드/언스케일 → 원본 좌표
-            r, dl, dt, h0, w0 = meta['r'], meta['dl'], meta['dt'], meta['h0'], meta['w0']
-            final_boxes, final_scores, final_cls = [], [], []
-
-            for i in keep:
-                x1, y1, x2, y2 = boxes[i]
-                X1 = (x1 - dl) / r
-                Y1 = (y1 - dt) / r
-                X2 = (x2 - dl) / r
-                Y2 = (y2 - dt) / r
-                X1, Y1, X2, Y2 = self._clip_box(X1, Y1, X2, Y2, w0, h0)
-
-                # 너무 작은 박스 제거
-                if (X2 - X1) * (Y2 - Y1) < self.min_box_area:
-                    continue
-
-                final_boxes.append([X1, Y1, X2, Y2])
-                final_scores.append(float(scores[i]))
-                final_cls.append(0)
-
-            return final_boxes, final_scores, final_cls
+            return final_boxes, final_scores, final_class_ids
 
         except Exception as e:
             self.get_logger().warn(f"후처리 오류: {e}")
+            import traceback
+            self.get_logger().error(f"후처리 상세 오류: {traceback.format_exc()}")
             return [], [], []
 
     def _draw(self, img, boxes, scores, class_ids):
