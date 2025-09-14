@@ -24,8 +24,8 @@ class PersonDetectorNode(Node):
         default_model_path = os.path.join(package_share_path, 'models', 'Yolo-X_w8a8.tflite')
 
         self.declare_parameter('model_path', default_model_path)
-        self.declare_parameter('confidence_threshold', 0.25) # 초기 임계값을 약간 낮춤
-        self.declare_parameter('nms_threshold', 0.45)
+        self.declare_parameter('confidence_threshold', 0.4) # 다양한 환경을 고려해 초기값 조정
+        self.declare_parameter('nms_threshold', 0.5)
         self.declare_parameter('input_topic', '/stream_image_raw')
         self.declare_parameter('detection_topic', '/person_detector/detection')
         self.declare_parameter('result_image_topic', '/person_detector/image_result')
@@ -128,26 +128,19 @@ class PersonDetectorNode(Node):
         input_data = np.expand_dims(rgb_image, axis=0).astype(np.uint8)
         return input_data, resized_image
 
-    # --- [수정] 후처리 함수 전체를 다중 텐서 출력에 맞게 재작성 ---
+    # --- [최종 수정] 후처리 함수 전체를 안정적인 새 로직으로 교체 ---
     def postprocess_output(self, outputs, original_shape, resized_shape):
         try:
             # 모델이 '좌표', '점수', '클래스'를 별도 텐서로 출력한다고 가정
-            # 모델 출력 구조 로그를 보고 순서가 다르면 이 부분을 조절해야 합니다.
-            # 예: outputs[0] = boxes, outputs[1] = scores, outputs[2] = classes
             if len(outputs) < 3:
-                # 모델이 예상과 다른 출력을 할 경우, 빈 결과를 반환
-                if len(outputs) > 0 and outputs[0].shape[2] > 4:
-                     # 단일 텐서 출력에 대한 이전 로직을 여기에 예비로 넣을 수 있음
-                     pass # 지금은 생략
                 return [], [], []
 
-            # 배치 차원 제거 (1, N, 4) -> (N, 4)
-            boxes_data = np.squeeze(outputs[0])
-            scores_data = np.squeeze(outputs[1])
-            classes_data = np.squeeze(outputs[2])
+            boxes_data = np.squeeze(outputs[0])     # (N, 4) -> x1, y1, x2, y2 (리사이즈된 이미지 기준)
+            scores_data = np.squeeze(outputs[1])    # (N,)   -> 신뢰도 점수
+            classes_data = np.squeeze(outputs[2])   # (N,)   -> 클래스 ID
 
-            # 신뢰도(Confidence)가 임계값 이상인 후보만 1차 필터링
-            score_mask = scores_data > self.confidence_threshold
+            # 1. 신뢰도(Confidence) 임계값으로 필터링
+            score_mask = scores_data >= self.confidence_threshold
             
             boxes_filtered = boxes_data[score_mask]
             scores_filtered = scores_data[score_mask]
@@ -156,7 +149,7 @@ class PersonDetectorNode(Node):
             if len(scores_filtered) == 0:
                 return [], [], []
 
-            # '사람' 클래스(ID: 0)만 2차 필터링
+            # 2. '사람' 클래스(ID: 0)만 필터링
             person_mask = classes_filtered == 0
             
             person_boxes = boxes_filtered[person_mask]
@@ -166,24 +159,29 @@ class PersonDetectorNode(Node):
             if len(person_scores) == 0:
                 return [], [], []
             
-            # NMS(Non-Max Suppression) 실행
-            # tf.image.non_max_suppression은 [y1, x1, y2, x2] 형식을 기대하지만
-            # 많은 모델은 [x1, y1, x2, y2]를 출력하므로 그대로 사용해봄
+            # 3. NMS(Non-Max Suppression)를 위해 좌표 형식 변경 ([x1, y1, x2, y2] -> [y1, x1, y2, x2])
+            boxes_for_nms = np.stack([
+                person_boxes[:, 1], person_boxes[:, 0],
+                person_boxes[:, 3], person_boxes[:, 2]
+            ], axis=1)
+
+            # 4. NMS 실행으로 겹치는 박스 제거
             selected_indices = tf.image.non_max_suppression(
-                person_boxes, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
+                boxes_for_nms, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
             )
             
-            # 최종 결과 정리 및 원본 이미지 크기로 스케일링
+            # 5. 최종 결과 정리 및 원본 이미지 크기로 좌표 스케일링
             final_boxes, final_scores, final_class_ids = [], [], []
             h_orig, w_orig = original_shape
+            h_res, w_res = resized_shape
             
             for index in selected_indices:
                 box = person_boxes[index]
-                # 좌표가 0~1 사이로 정규화되어 있다고 가정하고 스케일링
-                x1 = int(box[0] * w_orig)
-                y1 = int(box[1] * h_orig)
-                x2 = int(box[2] * w_orig)
-                y2 = int(box[3] * h_orig)
+                # 좌표는 리사이즈된 이미지 기준이므로, 원본 이미지 비율에 맞게 스케일링
+                x1 = int(box[0] * (w_orig / w_res))
+                y1 = int(box[1] * (h_orig / h_res))
+                x2 = int(box[2] * (w_orig / w_res))
+                y2 = int(box[3] * (h_orig / h_res))
                 
                 final_boxes.append([x1, y1, x2, y2])
                 final_scores.append(person_scores[index])
