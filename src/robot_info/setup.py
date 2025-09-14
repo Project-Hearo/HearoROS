@@ -21,7 +21,8 @@ setup(
     entry_points={
         'console_scripts': [
             'robot_location = robot_info.robot_location:main',
-            'camera_info = robot_info.camera_info:main' 
+            'camera_info = robot_info.camera_info:main' ,
+            'robot_map_location = robot_info.robot_map_location:main',
         ],
     },
 )
