@@ -203,6 +203,8 @@ class RtspStream(Node):
             if not ok:
                 time.sleep(0.003)
                 continue
+            self.get_logger().info("<<<<< Frame captured successfully from OpenCV! >>>>>")
+
             try:
                 msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
                 self.pub.publish(msg)
@@ -221,13 +223,13 @@ class RtspStream(Node):
         self._ffbuf.clear()
         DEBUG_LOG = bool(self.get_parameter('ffmpeg_debug_log').value)
         
-        self.rtsp_proc = subprocess.Popen(
-            args, # shlex.split() 제거!
-            stdin=subprocess.PIPE,
-            stdout=(subprocess.PIPE if DEBUG_LOG else subprocess.DEVNULL),
-            stderr=subprocess.STDOUT,
-            bufsize=0
-        )
+        # self.rtsp_proc = subprocess.Popen(
+        #     args, # shlex.split() 제거!
+        #     stdin=subprocess.PIPE,
+        #     stdout=(subprocess.PIPE if DEBUG_LOG else subprocess.DEVNULL),
+        #     stderr=subprocess.STDOUT,
+        #     bufsize=0
+        # )
 
         if DEBUG_LOG:
             self.rtsp_log_thread = threading.Thread(target=self._ffmpeg_log_drain, daemon=True)
@@ -236,7 +238,7 @@ class RtspStream(Node):
         self.rtsp_writer_thread = threading.Thread(
             target=self._writer_loop_rtsp, daemon=True
         )
-        self.rtsp_writer_thread.start()
+        # self.rtsp_writer_thread.start()
 
     def _ffmpeg_log_drain(self):
         p = self.rtsp_proc
