@@ -1,130 +1,169 @@
 #!/usr/bin/env python3
-
-import rclpy
-import math
+import rclpy, math
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, PolygonStamped
 from sensor_msgs.msg import LaserScan
 
+def clamp(v, lo, hi):
+    return lo if v < lo else hi if v > hi else v
+
 class PersonTrackerNode(Node):
     """
     AI가 탐지한 사람의 좌표와 라이다 거리를 이용해 사람을 추적하는 노드
+    - 정면 인덱스 계산: angle_min/angle_increment 기반(0rad 또는 오프셋)
+    - 거리 대표값: 메디안(튀는 값에 강인)
+    - 제어: 데드밴드 + 속도 제한 + 후진 허용 옵션
+    - 바운딩박스 중심: 모든 꼭짓점 평균(점 순서 무관)
     """
     def __init__(self):
         super().__init__('person_tracker_node')
 
         # --- 파라미터 선언 ---
-        self.declare_parameter('target_distance', 1)      # 목표 추적 거리 (미터)
-        self.declare_parameter('p_gain_angular', 0.005)     # 회전 제어를 위한 P 게인 값
-        self.declare_parameter('p_gain_linear', 0.4)       # 거리 제어를 위한 P 게인 값
-        self.declare_parameter('camera_width', 320.0)       # 카메라 영상의 너비 (픽셀)
-        self.declare_parameter('lidar_angle_range', 10.0)   # 정면으로 인식할 라이다 각도 범위 (도)
+        self.declare_parameter('target_distance', 1.0)          # m
+        self.declare_parameter('p_gain_angular', 0.005)          # rad/s per pixel
+        self.declare_parameter('p_gain_linear', 0.4)             # m/s per m
+        self.declare_parameter('camera_width', 320.0)            # px
+        self.declare_parameter('lidar_angle_range', 10.0)        # deg (정면 ±lidar_angle_range/2만 사용)
+        self.declare_parameter('front_yaw_offset_deg', 0.0)      # deg (라이다가 전방에서 몇 도 돌아갔는지)
+        self.declare_parameter('px_deadband', 8.0)               # px (화면 중심 오차 허용)
+        self.declare_parameter('d_deadband', 0.10)               # m  (거리 오차 허용)
+        self.declare_parameter('w_max', 1.2)                     # rad/s (yaw 최대)
+        self.declare_parameter('v_max', 0.40)                    # m/s   (전후 최대)
+        self.declare_parameter('allow_backward', True)           # 후진 허용 여부
 
-        # --- 발행자(Publisher) 생성 ---
-        # 로봇의 속도를 제어하기 위한 /cmd_vel 토픽 발행
+        # --- 발행자 ---
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        # --- 구독자(Subscriber) 생성 ---
-        # AI 탐지 노드가 발행하는 바운딩 박스 좌표 구독
+        # --- 구독자 ---
         self.detection_sub = self.create_subscription(
-            PolygonStamped,
-            '/person_detector/detection',
-            self.detection_callback,
-            10)
-        # 라이다 센서 데이터 구독
+            PolygonStamped, '/person_detector/detection', self.detection_callback, 10
+        )
         self.scan_sub = self.create_subscription(
-            LaserScan,
-            '/scan',
-            self.scan_callback,
-            10)
-            
-        # 최신 데이터를 저장할 변수 초기화
+            LaserScan, '/scan', self.scan_callback, 10
+        )
+
+        # 최신 데이터
         self.latest_detection = None
         self.latest_scan = None
-        
-        # 0.1초마다 제어 루프를 실행하는 타이머 생성 (10Hz)
-        self.timer = self.create_timer(0.1, self.control_loop)
-        
-        self.get_logger().info(f"'{self.get_name()}' 노드가 시작되었습니다.")
 
-    def detection_callback(self, msg):
-        """AI 탐지 결과를 받으면 최신 정보로 업데이트"""
+        # 10Hz 제어 루프
+        self.timer = self.create_timer(0.1, self.control_loop)
+
+        self.get_logger().info(f"'{self.get_name()}' 노드가 시작되었다.")
+
+    # -------------------- 콜백 --------------------
+    def detection_callback(self, msg: PolygonStamped):
         self.latest_detection = msg
 
-    def scan_callback(self, msg):
-        """라이다 스캔 데이터를 받으면 최신 정보로 업데이트"""
+    def scan_callback(self, msg: LaserScan):
         self.latest_scan = msg
 
+    # -------------------- 메인 제어 루프 --------------------
     def control_loop(self):
-        """주기적으로 실행되는 메인 제어 로직"""
-        # AI가 사람을 탐지하지 못했거나, 라이다 데이터가 없으면 정지
         if self.latest_detection is None or self.latest_scan is None:
             self.stop_robot()
             return
 
-        twist_msg = Twist()
-        
-        # --- 1. 회전 제어 로직 ---
-        camera_width = self.get_parameter('camera_width').get_parameter_value().double_value
-        screen_center_x = camera_width / 2.0
-        
-        # 바운딩 박스의 중심 X좌표 계산
-        p1 = self.latest_detection.polygon.points[0]
-        p2 = self.latest_detection.polygon.points[2]
-        person_center_x = (p1.x + p2.x) / 2.0
-        
-        # 화면 중앙과 사람 중심의 오차 계산
-        angular_error = screen_center_x - person_center_x
-        
-        p_gain_angular = self.get_parameter('p_gain_angular').get_parameter_value().double_value
-        twist_msg.angular.z = p_gain_angular * angular_error
-        
-        # --- 2. 거리 제어 로직 ---
-        # 라이다 데이터의 정면 부분만 사용하여 현재 거리 계산
-        current_distance = self.get_distance_from_scan()
-        
-        if current_distance is None:
+        twist = Twist()
+
+        # ---------- 1) 회전 제어 ----------
+        cam_w = self.get_parameter('camera_width').get_parameter_value().double_value
+        screen_cx = cam_w * 0.5
+
+        pts = self.latest_detection.polygon.points
+        if not pts:
             self.stop_robot()
             return
 
-        target_distance = self.get_parameter('target_distance').get_parameter_value().double_value
-        
-        # 목표 거리와 현재 거리의 오차 계산
-        linear_error = current_distance - target_distance
-        
-        p_gain_linear = self.get_parameter('p_gain_linear').get_parameter_value().double_value
-        twist_msg.linear.x = p_gain_linear * linear_error
+        # 점 순서 가정하지 않고 평균으로 중심 X 계산
+        person_cx = sum(p.x for p in pts) / len(pts)
 
-        # 계산된 속도 명령을 로봇에게 발행
-        self.cmd_vel_pub.publish(twist_msg)
+        ang_err_px = (screen_cx - person_cx)  # +이면 좌로 돌 필요(카메라 좌표계 기준)
+        p_gain_ang = self.get_parameter('p_gain_angular').get_parameter_value().double_value
+        px_deadband = self.get_parameter('px_deadband').get_parameter_value().double_value
+        w_max = self.get_parameter('w_max').get_parameter_value().double_value
 
+        if abs(ang_err_px) <= px_deadband:
+            twist.angular.z = 0.0
+        else:
+            twist.angular.z = clamp(p_gain_ang * ang_err_px, -w_max, w_max)
+
+        # ---------- 2) 거리 제어 ----------
+        dist = self.get_distance_from_scan()
+        if dist is None:
+            # 전방 유효 거리 없으면 멈춤
+            self.stop_robot()
+            return
+
+        target = self.get_parameter('target_distance').get_parameter_value().double_value
+        lin_err = dist - target  # +: 멀다→전진, -: 가깝다→후진
+        p_gain_lin = self.get_parameter('p_gain_linear').get_parameter_value().double_value
+        d_deadband = self.get_parameter('d_deadband').get_parameter_value().double_value
+        v_max = self.get_parameter('v_max').get_parameter_value().double_value
+        allow_backward = self.get_parameter('allow_backward').get_parameter_value().bool_value
+
+        if abs(lin_err) <= d_deadband:
+            twist.linear.x = 0.0
+        else:
+            v = clamp(p_gain_lin * lin_err, -v_max, v_max)
+            if not allow_backward and v < 0.0:
+                v = 0.0
+            twist.linear.x = v
+
+        # ---------- 3) 발행 ----------
+        self.cmd_vel_pub.publish(twist)
+
+    # -------------------- 라이다 전방 거리 산출 --------------------
     def get_distance_from_scan(self):
-        """라이다 데이터의 정면 부분에서 유효한 최소 거리를 계산"""
-        angle_range_deg = self.get_parameter('lidar_angle_range').get_parameter_value().double_value
-        angle_increment = self.latest_scan.angle_increment
-        
-        # 정면으로 간주할 각도 범위에 해당하는 인덱스 계산
-        center_index = len(self.latest_scan.ranges) // 2
-        index_range = int(math.radians(angle_range_deg / 2.0) / angle_increment)
-        
-        # 정면 범위의 거리 값들 추출
-        front_ranges = self.latest_scan.ranges[center_index - index_range : center_index + index_range]
-        
-        # 유효한(inf, nan이 아닌) 거리 값만 필터링
-        valid_ranges = [r for r in front_ranges if not (math.isinf(r) or math.isnan(r))]
-        
-        if not valid_ranges:
+        """
+        정면(0rad, 또는 front_yaw_offset_deg 반영) 주변 각도 범위에서 유효 거리들의 메디안을 반환한다.
+        - angle_min/angle_increment 기반으로 인덱스를 계산한다.
+        - 유효 범위(range_min~range_max) + finite 값만 사용한다.
+        """
+        scan = self.latest_scan
+        if scan is None or not scan.ranges:
             return None
-        
-        # 가장 가까운 거리를 현재 거리로 사용 (가장 보수적인 선택)
-        return min(valid_ranges)
 
+        angle_min = scan.angle_min
+        angle_inc = scan.angle_increment
+        n = len(scan.ranges)
+
+        # 정면 기준 각도(라이다 물리 장착 오프셋 보정)
+        front_yaw_deg = self.get_parameter('front_yaw_offset_deg').get_parameter_value().double_value
+        front_yaw = math.radians(front_yaw_deg)
+
+        # 0rad(또는 오프셋) → 인덱스
+        front_idx = int(round((front_yaw - angle_min) / angle_inc))
+        front_idx = max(0, min(n - 1, front_idx))
+
+        # 전방 섹터 폭
+        half_deg = self.get_parameter('lidar_angle_range').get_parameter_value().double_value / 2.0
+        half_rad = math.radians(max(0.1, half_deg))  # 최소 0.1도
+        idx_half = max(1, int(round(half_rad / angle_inc)))
+
+        start = max(0, front_idx - idx_half)
+        end = min(n, front_idx + idx_half + 1)
+
+        seg = scan.ranges[start:end]
+
+        # 유효값 필터링
+        valid = [
+            r for r in seg
+            if (scan.range_min <= r <= scan.range_max) and (not math.isinf(r)) and (not math.isnan(r))
+        ]
+        if not valid:
+            return None
+
+        # 메디안
+        valid.sort()
+        m = len(valid) // 2
+        return valid[m] if (len(valid) % 2 == 1) else 0.5 * (valid[m - 1] + valid[m])
+
+    # -------------------- 정지 --------------------
     def stop_robot(self):
-        """로봇을 정지시키는 메시지 발행"""
-        stop_msg = Twist()
-        self.cmd_vel_pub.publish(stop_msg)
-        # 탐지 실패 시, 다음 루프에서 다시 탐지할 수 있도록 최신 탐지 결과 초기화
-        self.latest_detection = None
+        self.cmd_vel_pub.publish(Twist())
+        # 다음 루프에서 다시 정상 복귀하도록 탐지값은 유지해도 되나, 원 로직 유지 시 아래 라인 사용
+        # self.latest_detection = None
 
 def main(args=None):
     rclpy.init(args=args)
