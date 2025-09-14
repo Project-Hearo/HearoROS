@@ -15,7 +15,7 @@ class RobotMapLocation(Node):
         self.declare_parameter('pub_topic', '/robot/map/location')
         self.declare_parameter('rate_hz', 2.0)
         
-        odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
+        pose_topic = self.get_parameter('pose_topic').get_parameter_value().string_value
         pub_topic  = self.get_parameter('pub_topic').get_parameter_value().string_value
         rate_hz    = float(self.get_parameter('rate_hz').value)
         qos_loc_pub = QoSProfile(
@@ -25,7 +25,7 @@ class RobotMapLocation(Node):
             history=HistoryPolicy.KEEP_LAST
         )
         self.pub = self.create_publisher(PointStamped, pub_topic, qos_loc_pub)
-        self.sub = self.create_subscription(PoseWithCovarianceStamped, odom_topic, self._odom_cb, qos_profile_sensor_data)
+        self.sub = self.create_subscription(PoseWithCovarianceStamped, pose_topic, self._odom_cb, qos_profile_sensor_data)
         
         self.period = 1.0 / rate_hz if rate_hz > 0 else 0.0
         self._latest_odom = None
