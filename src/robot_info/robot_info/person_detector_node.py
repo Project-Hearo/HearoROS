@@ -24,7 +24,7 @@ class PersonDetectorNode(Node):
         default_model_path = os.path.join(package_share_path, 'models', 'Yolo-X_w8a8.tflite')
 
         self.declare_parameter('model_path', default_model_path)
-        self.declare_parameter('confidence_threshold', 0.5)
+        self.declare_parameter('confidence_threshold', 0.25) # 초기 임계값을 약간 낮춤
         self.declare_parameter('nms_threshold', 0.45)
         self.declare_parameter('input_topic', '/stream_image_raw')
         self.declare_parameter('detection_topic', '/person_detector/detection')
@@ -110,7 +110,6 @@ class PersonDetectorNode(Node):
         self.draw_detections(frame, boxes, scores, class_ids)
         
         curr_time = time.time()
-        # prev_time이 0이면 첫 프레임이므로 FPS 계산 생략
         if self.prev_time > 0:
             fps = 1 / (curr_time - self.prev_time)
             cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, self.color, 2)
@@ -129,80 +128,71 @@ class PersonDetectorNode(Node):
         input_data = np.expand_dims(rgb_image, axis=0).astype(np.uint8)
         return input_data, resized_image
 
-    # --- [수정] 후처리 함수 전체를 안정적인 새 로직으로 교체 ---
+    # --- [수정] 후처리 함수 전체를 다중 텐서 출력에 맞게 재작성 ---
     def postprocess_output(self, outputs, original_shape, resized_shape):
         try:
-            # 모델 출력이 여러 개일 수 있으나, 보통 첫 번째 텐서에 모든 정보가 담겨있음
-            # (1, N, 85) -> 1=배치, N=탐지후보수, 85=cx,cy,w,h,conf,80개클래스점수
-            detections = np.squeeze(outputs[0])
-
-            # 신뢰도(Confidence)가 일정 값 이상인 후보만 필터링
-            conf_mask = detections[:, 4] > self.confidence_threshold
-            detections = detections[conf_mask]
-            if len(detections) == 0:
+            # 모델이 '좌표', '점수', '클래스'를 별도 텐서로 출력한다고 가정
+            # 모델 출력 구조 로그를 보고 순서가 다르면 이 부분을 조절해야 합니다.
+            # 예: outputs[0] = boxes, outputs[1] = scores, outputs[2] = classes
+            if len(outputs) < 3:
+                # 모델이 예상과 다른 출력을 할 경우, 빈 결과를 반환
+                if len(outputs) > 0 and outputs[0].shape[2] > 4:
+                     # 단일 텐서 출력에 대한 이전 로직을 여기에 예비로 넣을 수 있음
+                     pass # 지금은 생략
                 return [], [], []
 
-            # 클래스 점수 계산 및 필터링
-            class_scores = detections[:, 5:]
-            class_ids = np.argmax(class_scores, axis=1)
-            scores = detections[:, 4] * class_scores[np.arange(len(detections)), class_ids]
-            score_mask = scores > self.confidence_threshold
+            # 배치 차원 제거 (1, N, 4) -> (N, 4)
+            boxes_data = np.squeeze(outputs[0])
+            scores_data = np.squeeze(outputs[1])
+            classes_data = np.squeeze(outputs[2])
+
+            # 신뢰도(Confidence)가 임계값 이상인 후보만 1차 필터링
+            score_mask = scores_data > self.confidence_threshold
             
-            detections = detections[score_mask]
-            scores = scores[score_mask]
-            class_ids = class_ids[score_mask]
-            if len(detections) == 0:
+            boxes_filtered = boxes_data[score_mask]
+            scores_filtered = scores_data[score_mask]
+            classes_filtered = classes_data[score_mask]
+
+            if len(scores_filtered) == 0:
                 return [], [], []
 
-            # '사람' 클래스(ID: 0)만 필터링
-            person_mask = class_ids == 0
-            boxes_data = detections[person_mask][:, :4]
-            person_scores = scores[person_mask]
-            person_class_ids = class_ids[person_mask]
-            if len(boxes_data) == 0:
-                return [], [], []
+            # '사람' 클래스(ID: 0)만 2차 필터링
+            person_mask = classes_filtered == 0
+            
+            person_boxes = boxes_filtered[person_mask]
+            person_scores = scores_filtered[person_mask]
+            person_class_ids = classes_filtered[person_mask]
 
-            # 바운딩 박스 좌표 변환 (cx,cy,w,h -> y1,x1,y2,x2 for NMS)
-            cx, cy, w, h = boxes_data[:, 0], boxes_data[:, 1], boxes_data[:, 2], boxes_data[:, 3]
-            y1 = cy - h / 2
-            x1 = cx - w / 2
-            y2 = cy + h / 2
-            x2 = cx + w / 2
-            boxes_for_nms = np.stack([y1, x1, y2, x2], axis=1)
+            if len(person_scores) == 0:
+                return [], [], []
             
             # NMS(Non-Max Suppression) 실행
+            # tf.image.non_max_suppression은 [y1, x1, y2, x2] 형식을 기대하지만
+            # 많은 모델은 [x1, y1, x2, y2]를 출력하므로 그대로 사용해봄
             selected_indices = tf.image.non_max_suppression(
-                boxes_for_nms, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
+                person_boxes, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
             )
             
             # 최종 결과 정리 및 원본 이미지 크기로 스케일링
             final_boxes, final_scores, final_class_ids = [], [], []
             h_orig, w_orig = original_shape
-            h_res, w_res = resized_shape
             
             for index in selected_indices:
-                x1_res, y1_res, x2_res, y2_res = boxes_data[index][:4]
-                # 중심점과 너비/높이를 원본 이미지 기준으로 변환
-                cx_orig = x1_res * (w_orig / w_res)
-                cy_orig = y1_res * (h_orig / h_res)
-                w_orig_s = x2_res * (w_orig / w_res)
-                h_orig_s = y2_res * (h_orig / h_res)
+                box = person_boxes[index]
+                # 좌표가 0~1 사이로 정규화되어 있다고 가정하고 스케일링
+                x1 = int(box[0] * w_orig)
+                y1 = int(box[1] * h_orig)
+                x2 = int(box[2] * w_orig)
+                y2 = int(box[3] * h_orig)
                 
-                x1_final = int(cx_orig - w_orig_s / 2)
-                y1_final = int(cy_orig - h_orig_s / 2)
-                x2_final = int(cx_orig + w_orig_s / 2)
-                y2_final = int(cy_orig + h_orig_s / 2)
-
-                final_boxes.append([x1_final, y1_final, x2_final, y2_final])
+                final_boxes.append([x1, y1, x2, y2])
                 final_scores.append(person_scores[index])
-                final_class_ids.append(person_class_ids[index])
+                final_class_ids.append(int(person_class_ids[index]))
             
             return final_boxes, final_scores, final_class_ids
 
         except Exception as e:
             self.get_logger().error(f"후처리 중 오류 발생: {e}", throttle_duration_sec=2)
-            # import traceback
-            # traceback.print_exc()
         return [], [], []
 
     def draw_detections(self, frame, boxes, scores, class_ids):
