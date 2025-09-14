@@ -1,44 +1,39 @@
 #!/usr/bin/env python3
 
-# [추가] ROS 2 관련 라이브러리
 from ament_index_python.packages import get_package_share_directory
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PolygonStamped, Point32
 from cv_bridge import CvBridge
-# [수정] QoS 설정을 위해 추가
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.exceptions import ParameterNotDeclaredException
+from rcl_interfaces.msg import SetParametersResult
 
-# [기존] 필요한 라이브러리들
 import cv2
 import numpy as np
 import tensorflow as tf
 import os
-import logging
 import time
 
-# COCO 클래스 이름 (기존과 동일)
-COCO_CLASSES = [ 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush' ]
-
-# 로깅 설정 (기존과 동일)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# [변경] 클래스를 ROS 2 노드로 변경
 class PersonDetectorNode(Node):
     def __init__(self):
         super().__init__('person_detector_node')
         
+        # [통합] 패키지 경로 설정
         package_share_path = get_package_share_directory('robot_info')
         default_model_path = os.path.join(package_share_path, 'models', 'Yolo-X_w8a8.tflite')
 
+        # [유지] ROS 2 파라미터 선언
         self.declare_parameter('model_path', default_model_path)
         self.declare_parameter('confidence_threshold', 0.5)
         self.declare_parameter('nms_threshold', 0.45)
         self.declare_parameter('input_topic', '/stream_image_raw')
         self.declare_parameter('detection_topic', '/person_detector/detection')
         self.declare_parameter('result_image_topic', '/person_detector/image_result')
+        
+        # [개선] 파라미터 변경 시 호출될 콜백 등록
+        self.add_on_set_parameters_callback(self.parameters_callback)
 
         # 파라미터 값 가져오기
         model_path = self.get_parameter('model_path').get_parameter_value().string_value
@@ -48,27 +43,21 @@ class PersonDetectorNode(Node):
         detection_topic = self.get_parameter('detection_topic').get_parameter_value().string_value
         result_image_topic = self.get_parameter('result_image_topic').get_parameter_value().string_value
         
-        # [추가] CvBridge 초기화
         self.bridge = CvBridge()
 
-        # [수정] 센서 데이터에 맞는 QoS 프로파일 생성
+        # QoS 프로파일 생성
         sensor_qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
 
-        # [수정] 구독자 생성 시 QoS 프로파일 적용
-        self.image_sub = self.create_subscription(
-            Image, 
-            input_topic, 
-            self.image_callback, 
-            sensor_qos_profile  # QoS 설정 적용
-        )
+        # 구독자 및 발행자 생성
+        self.image_sub = self.create_subscription(Image, input_topic, self.image_callback, sensor_qos_profile)
         self.detection_pub = self.create_publisher(PolygonStamped, detection_topic, 10)
         self.result_image_pub = self.create_publisher(Image, result_image_topic, 10)
         
-        # TFLite 모델 로드 (기존 __init__ 로직)
+        # TFLite 모델 로드
         if not os.path.exists(model_path):
             self.get_logger().error(f"모델 파일을 찾을 수 없습니다: {model_path}")
             rclpy.shutdown()
@@ -80,15 +69,25 @@ class PersonDetectorNode(Node):
         self.output_details = self.interpreter.get_output_details()
         self.input_height = self.input_details[0]['shape'][1]
         self.input_width = self.input_details[0]['shape'][2]
-        self.colors = np.random.uniform(0, 255, size=(len(COCO_CLASSES), 3))
+        
+        # [통합] 사람 탐지용 색상 (녹색)
+        self.color = (0, 255, 0)
+
+        # [통합] FPS 계산을 위한 변수
+        self.prev_time = 0
 
         self.get_logger().info(f"'{self.get_name()}' 노드가 시작되었습니다. 모델: {model_path}")
+        self.get_logger().info(f"모델 출력 상세 정보: {self.output_details}")
 
-    # [변경] 기존 run() 메서드가 콜백 함수로 변경됨
+    # [개선] 파라미터 동적 변경을 위한 콜백 함수
+    def parameters_callback(self, params):
+        for param in params:
+            if param.name == 'confidence_threshold':
+                self.confidence_threshold = param.value
+                self.get_logger().info(f"신뢰도 임계값이 {self.confidence_threshold:.2f} (으)로 변경되었습니다.")
+        return SetParametersResult(successful=True)
+
     def image_callback(self, msg: Image):
-        # [추가된 로그] 콜백 함수가 실행되는지 확인
-        self.get_logger().info('이미지 메시지 수신됨, 처리 시작...')
-        
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         except Exception as e:
@@ -99,38 +98,34 @@ class PersonDetectorNode(Node):
         
         self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
         self.interpreter.invoke()
-        output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
+        
+        outputs = [self.interpreter.get_tensor(detail['index']) for detail in self.output_details]
 
         boxes, scores, class_ids = self.postprocess_output(
-            output_data, frame.shape[:2], resized_frame.shape[:2]
+            outputs, frame.shape[:2], resized_frame.shape[:2]
         )
 
-        # [추가] 탐지된 객체 좌표 발행
         if len(boxes) > 0:
-            # [추가된 로그] 몇 명의 사람을 탐지했는지 출력
-            self.get_logger().info(f">>> {len(boxes)}명의 사람을 탐지했습니다!")
-
-            # 가장 신뢰도 높은 첫 번째 사람만 발행 (필요시 반복문으로 모두 발행 가능)
+            self.get_logger().info(f">>> 탐지된 사람 수: {len(boxes)}")
             box = boxes[0] 
             x1, y1, x2, y2 = box
             
             detection_msg = PolygonStamped()
-            detection_msg.header = msg.header # 원본 이미지의 타임스탬프와 frame_id 사용
-            
-            # 바운딩 박스의 네 꼭짓점 좌표
+            detection_msg.header = msg.header
             detection_msg.polygon.points = [
-                Point32(x=float(x1), y=float(y1), z=0.0),
-                Point32(x=float(x2), y=float(y1), z=0.0),
-                Point32(x=float(x2), y=float(y2), z=0.0),
-                Point32(x=float(x1), y=float(y2), z=0.0),
+                Point32(x=float(x1), y=float(y1), z=0.0), Point32(x=float(x2), y=float(y1), z=0.0),
+                Point32(x=float(x2), y=float(y2), z=0.0), Point32(x=float(x1), y=float(y2), z=0.0),
             ]
             self.detection_pub.publish(detection_msg)
-        else:
-            # [추가된 로그] 사람을 탐지하지 못했을 경우 출력
-            self.get_logger().info("탐지된 사람이 없습니다.")
-
-        # [추가] 결과 영상 발행 (디버깅용)
+        
         self.draw_detections(frame, boxes, scores, class_ids)
+        
+        # [통합] FPS 계산 및 표시
+        curr_time = time.time()
+        fps = 1 / (curr_time - self.prev_time)
+        self.prev_time = curr_time
+        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, self.color, 2)
+        
         try:
             result_msg = self.bridge.cv2_to_imgmsg(frame, "bgr8")
             result_msg.header = msg.header
@@ -138,55 +133,94 @@ class PersonDetectorNode(Node):
         except Exception as e:
             self.get_logger().error(f"결과 이미지 발행 실패: {e}")
 
-    # --- 아래 함수들은 기존 코드와 거의 동일 (클래스 멤버 변수 사용하도록 수정) ---
     def preprocess_image(self, image):
         resized_image = cv2.resize(image, (self.input_width, self.input_height))
         rgb_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
         input_data = np.expand_dims(rgb_image, axis=0).astype(np.uint8)
         return input_data, resized_image
 
-    def postprocess_output(self, output_data, original_shape, resized_shape):
-        detections = output_data[0]
-        conf_mask = detections[:, 4] > self.confidence_threshold
-        detections = detections[conf_mask]
-        if len(detections) == 0: return [], [], []
-        class_scores = detections[:, 5:]
-        class_ids = np.argmax(class_scores, axis=1)
-        scores = detections[:, 4] * class_scores[np.arange(len(detections)), class_ids]
-        score_mask = scores > self.confidence_threshold
-        detections, scores, class_ids = detections[score_mask], scores[score_mask], class_ids[score_mask]
-        person_mask = class_ids == 0
-        detections, scores, class_ids = detections[person_mask], scores[person_mask], class_ids[person_mask]
-        if len(detections) == 0: return [], [], []
-        boxes_cxcywh = detections[:, :4]
-        x1, y1 = boxes_cxcywh[:, 0] - boxes_cxcywh[:, 2] / 2, boxes_cxcywh[:, 1] - boxes_cxcywh[:, 3] / 2
-        x2, y2 = boxes_cxcywh[:, 0] + boxes_cxcywh[:, 2] / 2, boxes_cxcywh[:, 1] + boxes_cxcywh[:, 3] / 2
-        boxes = np.stack([y1, x1, y2, x2], axis=1)
-        selected_indices = tf.image.non_max_suppression(boxes, scores, max_output_size=50, iou_threshold=self.nms_threshold)
-        final_boxes, final_scores, final_class_ids = [], [], []
-        h_orig, w_orig = original_shape
-        h_res, w_res = resized_shape
-        for index in selected_indices:
-            box = boxes[index]
-            y1_orig, x1_orig = int(box[0] * (h_orig / h_res)), int(box[1] * (w_orig / w_res))
-            y2_orig, x2_orig = int(box[2] * (h_orig / h_res)), int(box[3] * (w_orig / w_res))
-            final_boxes.append([x1_orig, y1_orig, x2_orig, y2_orig])
-            final_scores.append(scores[index])
-            final_class_ids.append(class_ids[index])
-        return final_boxes, final_scores, final_class_ids
+    # [통합] 독립 실행 파일의 상세한 후처리 로직으로 교체
+    def postprocess_output(self, outputs, original_shape, resized_shape):
+        try:
+            # 양자화된 모델 출력 파싱 (출력 텐서가 3개 이상일 경우)
+            if len(outputs) >= 3:
+                boxes_quantized = outputs[0][0]
+                scores_quantized = outputs[1][0]
+                classes_quantized = outputs[2][0]
+                
+                # 양자화 파라미터로 디코딩
+                boxes_scale = self.output_details[0]['quantization_parameters']['scales'][0]
+                boxes_zero_point = self.output_details[0]['quantization_parameters']['zero_points'][0]
+                scores_scale = self.output_details[1]['quantization_parameters']['scales'][0]
+                scores_zero_point = self.output_details[1]['quantization_parameters']['zero_points'][0]
+                
+                boxes = (boxes_quantized.astype(np.float32) - boxes_zero_point) * boxes_scale
+                scores = (scores_quantized.astype(np.float32) - scores_zero_point) * scores_scale
+                classes = classes_quantized.astype(np.int32)
+                
+                # 사람 클래스(id=0)만 필터링
+                person_indices = np.where(classes == 0)[0]
+                if len(person_indices) == 0: return [], [], []
+                
+                person_boxes = boxes[person_indices]
+                person_scores = scores[person_indices]
+                person_classes = classes[person_indices]
+                
+                # 신뢰도 임계값 필터링
+                score_mask = person_scores >= self.confidence_threshold
+                person_boxes = person_boxes[score_mask]
+                person_scores = person_scores[score_mask]
+                person_classes = person_classes[score_mask]
+                
+                if len(person_boxes) == 0: return [], [], []
+                
+                # NMS 적용
+                selected_indices = tf.image.non_max_suppression(
+                    person_boxes, person_scores, max_output_size=10, iou_threshold=self.nms_threshold
+                )
+                
+                # 최종 결과 정리
+                final_boxes, final_scores, final_class_ids = [], [], []
+                h_orig, w_orig = original_shape
+                
+                for index in selected_indices:
+                    x1_norm, y1_norm, x2_norm, y2_norm = person_boxes[index]
+                    
+                    x1 = int(x1_norm * w_orig)
+                    y1 = int(y1_norm * h_orig)
+                    x2 = int(x2_norm * w_orig)
+                    y2 = int(y2_norm * h_orig)
 
+                    # 바운딩 박스 좌표가 이미지 경계를 벗어나지 않도록 조정
+                    x1_orig, y1_orig = max(0, x1), max(0, y1)
+                    x2_orig, y2_orig = min(w_orig, x2), min(h_orig, y2)
+                    
+                    if x2_orig > x1_orig and y2_orig > y1_orig:
+                        final_boxes.append([x1_orig, y1_orig, x2_orig, y2_orig])
+                        final_scores.append(person_scores[index])
+                        final_class_ids.append(person_classes[index])
+                        
+                return final_boxes, final_scores, final_class_ids
+
+        except Exception as e:
+            self.get_logger().error(f"후처리 중 오류 발생: {e}", throttle_duration_sec=2)
+            import traceback
+            traceback.print_exc()
+
+        return [], [], []
+
+    # [통합] 사람만 그리도록 간소화된 그리기 함수
     def draw_detections(self, frame, boxes, scores, class_ids):
         for i in range(len(boxes)):
             x1, y1, x2, y2 = boxes[i]
-            score, class_id = scores[i], class_ids[i]
-            label, color = COCO_CLASSES[class_id], self.colors[class_id]
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            label_text = f'{label}: {score:.2f}'
+            score = scores[i]
+            label_text = f'person: {score:.2f}'
+            
+            cv2.rectangle(frame, (x1, y1), (x2, y2), self.color, 2)
             (w, h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
-            cv2.rectangle(frame, (x1, y1 - h - 5), (x1 + w, y1), color, -1)
+            cv2.rectangle(frame, (x1, y1 - h - 5), (x1 + w, y1), self.color, -1)
             cv2.putText(frame, label_text, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-# [변경] ROS 2 노드를 실행하기 위한 main 함수
 def main():
     rclpy.init()
     node = PersonDetectorNode()
