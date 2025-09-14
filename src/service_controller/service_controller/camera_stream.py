@@ -30,7 +30,7 @@ class RtspStream(Node):
 
             # ===== MQTT 발행 옵션 =====
             ('mqtt_enable', True),
-            ('mqtt_broker', os.getenv('MQTT_BROKER', 'localhost')),
+            ('mqtt_broker', os.getenv('MQTT_SERVER', 'localhost')),
             ('mqtt_port', int(os.getenv('MQTT_PORT', '1883'))),
             ('mqtt_username', os.getenv('MQTT_USERNAME', '')),
             ('mqtt_password', os.getenv('MQTT_PASSWORD', '')),
