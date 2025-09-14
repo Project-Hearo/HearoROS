@@ -29,6 +29,12 @@ RUN set -eux; \
       python3-paho-mqtt; \
     rm -rf /var/lib/apt/lists/*
 
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      python3-opencv python3-numpy; \
+    pip install --no-cache-dir tflite-runtime; \
+    rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends \
     python3-requests \
