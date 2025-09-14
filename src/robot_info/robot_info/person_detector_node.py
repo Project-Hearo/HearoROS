@@ -7,6 +7,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import PolygonStamped, Point32
 from cv_bridge import CvBridge
+# [수정] QoS 설정을 위해 추가
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 # [기존] 필요한 라이브러리들
 import cv2
@@ -49,8 +51,20 @@ class PersonDetectorNode(Node):
         # [추가] CvBridge 초기화
         self.bridge = CvBridge()
 
-        # [추가] 구독자 및 발행자 생성
-        self.image_sub = self.create_subscription(Image, input_topic, self.image_callback, 10)
+        # [수정] 센서 데이터에 맞는 QoS 프로파일 생성
+        sensor_qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+
+        # [수정] 구독자 생성 시 QoS 프로파일 적용
+        self.image_sub = self.create_subscription(
+            Image, 
+            input_topic, 
+            self.image_callback, 
+            sensor_qos_profile  # QoS 설정 적용
+        )
         self.detection_pub = self.create_publisher(PolygonStamped, detection_topic, 10)
         self.result_image_pub = self.create_publisher(Image, result_image_topic, 10)
         
@@ -72,6 +86,9 @@ class PersonDetectorNode(Node):
 
     # [변경] 기존 run() 메서드가 콜백 함수로 변경됨
     def image_callback(self, msg: Image):
+        # [추가된 로그] 콜백 함수가 실행되는지 확인
+        self.get_logger().info('이미지 메시지 수신됨, 처리 시작...')
+        
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         except Exception as e:
@@ -90,6 +107,9 @@ class PersonDetectorNode(Node):
 
         # [추가] 탐지된 객체 좌표 발행
         if len(boxes) > 0:
+            # [추가된 로그] 몇 명의 사람을 탐지했는지 출력
+            self.get_logger().info(f">>> {len(boxes)}명의 사람을 탐지했습니다!")
+
             # 가장 신뢰도 높은 첫 번째 사람만 발행 (필요시 반복문으로 모두 발행 가능)
             box = boxes[0] 
             x1, y1, x2, y2 = box
@@ -105,6 +125,9 @@ class PersonDetectorNode(Node):
                 Point32(x=float(x1), y=float(y2), z=0.0),
             ]
             self.detection_pub.publish(detection_msg)
+        else:
+            # [추가된 로그] 사람을 탐지하지 못했을 경우 출력
+            self.get_logger().info("탐지된 사람이 없습니다.")
 
         # [추가] 결과 영상 발행 (디버깅용)
         self.draw_detections(frame, boxes, scores, class_ids)
