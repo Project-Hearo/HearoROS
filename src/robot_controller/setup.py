@@ -23,6 +23,7 @@ setup(
             'person_fusion_follower = robot_controller.person_fusion_follower:main',
             'robot_tracker = robot_controller.robot_tracker:main',
             'obstacle_follower = robot_controller.obstacle_follower:main',
+            'person_detector_node = robot_controller.person_detector_node:main',
         ],
     },
 )
