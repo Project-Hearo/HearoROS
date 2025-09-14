@@ -27,7 +27,7 @@ class RtspStream(Node):
 
             # FFmpeg encode
             ('codec', 'h264_v4l2m2m'),        # 문제시 'libx264'로 바꿔 확인
-            ('bitrate', '1M'),
+            ('bitrate', '0.1M'),
             ('gop', 120),
             ('preset', 'veryfast'),
             ('tune', 'zerolatency'),
