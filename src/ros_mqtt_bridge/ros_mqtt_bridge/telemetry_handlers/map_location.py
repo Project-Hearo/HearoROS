@@ -19,7 +19,7 @@ class MapLocationTelemetry(TelemetryHandler):
     
     def start(self):
         if self.running:
-            retur
+            return
         self.running = True
         self.sub = self.node.create_subscription(PointStamped, '/robot/map/location', self.callback, 10)
         
