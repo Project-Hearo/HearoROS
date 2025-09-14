@@ -46,7 +46,6 @@ docker run -it --rm \
   --security-opt apparmor:unconfined \
   -v /dev:/dev \
   --group-add video \
-  --group-add render \
   -v ~/Desktop/HearoROS:/root/HearoROS \
   -v /var/run/dbus:/var/run/dbus \
   --env-file ~/Desktop/HearoROS/.env \
