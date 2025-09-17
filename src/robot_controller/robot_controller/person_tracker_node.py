@@ -19,7 +19,7 @@ class PersonTrackerNode(Node):
         super().__init__('person_tracker_node')
 
         # --- 파라미터 선언 ---
-        self.declare_parameter('target_distance', 1.0)          # m
+        self.declare_parameter('target_distance', 1.5)          # m
         self.declare_parameter('p_gain_angular', 0.005)          # rad/s per pixel
         self.declare_parameter('p_gain_linear', 0.4)             # m/s per m
         self.declare_parameter('camera_width', 320.0)            # px
